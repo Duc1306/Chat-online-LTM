@@ -1,0 +1,35 @@
+# Compiled binaries
+chat_server
+example_client
+*.o
+*.exe
+
+# Data files
+users.txt
+groups.txt
+friendships.txt
+offline_messages.txt
+
+# Log files
+*.log
+server.log
+messages.log
+
+# Temporary files
+temp/
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Core dumps
+core
+core.*
