@@ -255,7 +255,7 @@ THREAD_RETURN receive_thread(void *arg) {
                 
             case MSG_USER_ONLINE:
                 set_color(COLOR_GREEN);
-                printf("\n🟢 %s is now online\n", msg.from);
+                printf("\n🟢 %s is now online\n", msg.content);
                 set_color(COLOR_RESET);
                 printf("> ");
                 fflush(stdout);
@@ -263,7 +263,7 @@ THREAD_RETURN receive_thread(void *arg) {
                 
             case MSG_USER_OFFLINE:
                 set_color(COLOR_YELLOW);
-                printf("\n🔴 %s is now offline\n", msg.from);
+                printf("\n🔴 %s is now offline\n", msg.content);
                 set_color(COLOR_RESET);
                 printf("> ");
                 fflush(stdout);
@@ -277,6 +277,7 @@ THREAD_RETURN receive_thread(void *arg) {
                 fflush(stdout);
                 break;
                 
+            case MSG_GET_ONLINE_USERS:
             case MSG_ONLINE_USERS_LIST:
             case MSG_FRIEND_LIST:
             case MSG_GROUP_LIST:
