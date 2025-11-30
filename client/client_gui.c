@@ -367,7 +367,24 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             }
             break;
 
-        case WM_DESTROY: PostQuitMessage(0); return 0;
+        case WM_CLOSE:
+            // Gửi logout trước khi đóng cửa sổ
+            if (is_logged_in && client_socket != INVALID_SOCKET) {
+                SendRequest(MSG_LOGOUT, "", "");
+                Sleep(100); // Đợi 100ms để gửi xong
+            }
+            DestroyWindow(hwnd);
+            return 0;
+
+        case WM_DESTROY:
+            // Cleanup socket và thoát
+            if (client_socket != INVALID_SOCKET) {
+                closesocket(client_socket);
+                client_socket = INVALID_SOCKET;
+            }
+            WSACleanup();
+            PostQuitMessage(0);
+            return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }

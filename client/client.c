@@ -294,6 +294,30 @@ THREAD_RETURN receive_thread(void *arg) {
                 fflush(stdout);
                 break;
                 
+            case MSG_SUCCESS:
+                print_success(msg.content);
+                // Nếu login thành công, set flag
+                if (strstr(msg.content, "Login successful") != NULL) {
+                    is_logged_in = true;
+                    strncpy(current_username, msg.to, MAX_USERNAME_LEN - 1);
+                }
+                printf("> ");
+                fflush(stdout);
+                break;
+                
+            case MSG_ERROR:
+                print_error(msg.content);
+                // Nếu login/register thất bại, clear state
+                if (strstr(msg.content, "not found") != NULL || 
+                    strstr(msg.content, "Wrong password") != NULL ||
+                    strstr(msg.content, "already logged in") != NULL) {
+                    is_logged_in = false;
+                    current_username[0] = '\0';
+                }
+                printf("> ");
+                fflush(stdout);
+                break;
+                
             default:
                 break;
         }
@@ -388,8 +412,7 @@ void login() {
     
     if (send_message_struct(server_socket, &msg) > 0) {
         print_info("Login request sent. Waiting for response...");
-        strncpy(current_username, username, MAX_USERNAME_LEN - 1);
-        is_logged_in = true;
+        // Không set is_logged_in ở đây - đợi MSG_SUCCESS từ server
     } else {
         print_error("Failed to send login request");
     }
