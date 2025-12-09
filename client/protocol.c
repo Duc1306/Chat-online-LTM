@@ -3,35 +3,28 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <windows.h>
+#include <unistd.h>
 
 /**
- * Initialize network - Windows WSA
+ * Initialize network - Linux (no-op)
  */
 int init_network(void) {
-    WSADATA wsaData;
-    int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-    if (result != 0) {
-        fprintf(stderr, "WSAStartup failed: %d\n", result);
-        return -1;
-    }
-    printf("[NETWORK] Windows Sockets initialized\n");
+    printf("[NETWORK] Linux sockets ready\n");
     return 0;
 }
 
 /**
- * Cleanup network - Windows WSA
+ * Cleanup network - Linux (no-op)
  */
 void cleanup_network(void) {
-    WSACleanup();
-    printf("[NETWORK] Windows Sockets cleaned up\n");
+    printf("[NETWORK] Linux sockets cleaned up\n");
 }
 
 /**
- * Windows sleep function
+ * Linux sleep function
  */
 void sleep_ms(int milliseconds) {
-    Sleep(milliseconds);
+    usleep(milliseconds * 1000);
 }
 
 

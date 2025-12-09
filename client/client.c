@@ -1,5 +1,5 @@
 /*
- * ChatOnline Client - Full-Featured Windows Client
+ * ChatOnline Client - Full-Featured Linux Client
  * 
  * === FEATURES ===
  * - Register & Login
@@ -11,22 +11,21 @@
  * - File Transfer
  * 
  * === COMPILE ===
- * gcc -o client.exe client.c protocol.c -lws2_32 -Wall -Wextra
+ * gcc -o client client.c protocol.c -pthread -Wall -Wextra
  * 
  * === RUN ===
- * client.exe
+ * ./client
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
-#include <process.h>
-
-#pragma comment(lib, "ws2_32.lib")
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <pthread.h>
 
 #include "protocol.h"
 
@@ -34,12 +33,11 @@
 // TYPE DEFINITIONS
 // ===========================
 
-typedef SOCKET socket_t;
-typedef HANDLE thread_t;
+typedef int socket_t;
+typedef pthread_t thread_t;
 
-#define close closesocket
-#define INVALID_SOCKET_VALUE INVALID_SOCKET
-#define THREAD_RETURN unsigned int __stdcall
+#define INVALID_SOCKET_VALUE -1
+#define THREAD_RETURN void*
 
 // ===========================
 // GLOBAL VARIABLES
@@ -55,18 +53,31 @@ bool is_logged_in = false;
 // ===========================
 
 void set_color(int color) {
-    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-    SetConsoleTextAttribute(hConsole, color);
+    // ANSI color codes for Linux
+    const char *color_codes[] = {
+        "\033[0m",   // 0: RESET
+        "\033[31m",  // 1: RED
+        "\033[32m",  // 2: GREEN
+        "\033[33m",  // 3: YELLOW
+        "\033[34m",  // 4: BLUE
+        "\033[35m",  // 5: MAGENTA
+        "\033[36m",  // 6: CYAN
+        "\033[37m"   // 7: WHITE
+    };
+    
+    if (color >= 0 && color < 8) {
+        printf("%s", color_codes[color]);
+    }
 }
 
-#define COLOR_RESET 7
-#define COLOR_RED 12
-#define COLOR_GREEN 10
-#define COLOR_YELLOW 14
-#define COLOR_BLUE 9
-#define COLOR_MAGENTA 13
-#define COLOR_CYAN 11
-#define COLOR_WHITE 15
+#define COLOR_RESET 0
+#define COLOR_RED 1
+#define COLOR_GREEN 2
+#define COLOR_YELLOW 3
+#define COLOR_BLUE 4
+#define COLOR_MAGENTA 5
+#define COLOR_CYAN 6
+#define COLOR_WHITE 7
 
 void print_header(const char *title) {
     set_color(COLOR_CYAN);
@@ -323,7 +334,7 @@ THREAD_RETURN receive_thread(void *arg) {
         }
     }
     
-    return 0;
+    return NULL;
 }
 
 // ===========================
@@ -787,11 +798,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    // Set console title
-    SetConsoleTitle("ChatOnline Client");
+    // Clear screen (Linux)
+    printf("\033[2J\033[H");
     
     // Print banner
-    system("cls");
     set_color(COLOR_CYAN);
     printf("\n");
     printf("  ╔═══════════════════════════════════════════════════════╗\n");
@@ -879,13 +889,13 @@ int main(int argc, char *argv[]) {
     
     // Start receive thread
     thread_t recv_thread;
-    recv_thread = (HANDLE)_beginthreadex(NULL, 0, receive_thread, NULL, 0, NULL);
-    if (recv_thread == 0) {
+    if (pthread_create(&recv_thread, NULL, receive_thread, NULL) != 0) {
         print_error("Failed to create receive thread");
         close(server_socket);
         cleanup_network();
         return 1;
     }
+    pthread_detach(recv_thread);
     
     // Main loop
     int choice;
@@ -923,13 +933,11 @@ int main(int argc, char *argv[]) {
                 break;
         }
         
-        Sleep(100);
+        usleep(100000);  // 100ms
     }
     
     // Cleanup
     close(server_socket);
-    WaitForSingleObject(recv_thread, 2000);
-    CloseHandle(recv_thread);
     cleanup_network();
     
     set_color(COLOR_CYAN);

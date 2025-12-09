@@ -3,11 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #include <signal.h>
-
-#pragma comment(lib, "ws2_32.lib")
 
 ServerState server_state;
 
@@ -85,8 +85,8 @@ int accept_client(int server_socket, ClientConnection *client) {
     memset(client->username, 0, MAX_USERNAME_LEN);
     
     char client_ip[INET_ADDRSTRLEN];
-    // Windows: Use inet_ntoa
-    strcpy(client_ip, inet_ntoa(client->address.sin_addr));
+    // Linux: Use inet_ntop
+    inet_ntop(AF_INET, &(client->address.sin_addr), client_ip, INET_ADDRSTRLEN);
     
     printf("[SERVER] New connection from %s:%d (socket: %d)\n", 
            client_ip, ntohs(client->address.sin_port), client_socket);
@@ -901,18 +901,15 @@ int main(int argc, char *argv[]) {
         server_state.client_count++;
         mutex_unlock(&server_state.clients_mutex);
         
-        // Windows thread
-        new_client->thread_id = (HANDLE)_beginthreadex(NULL, 0, 
-                                    (unsigned int (__stdcall *)(void*))client_thread, 
-                                    new_client, 0, NULL);
-        if (new_client->thread_id == 0) {
+        // Linux pthread
+        if (pthread_create(&new_client->thread_id, NULL, client_thread, new_client) != 0) {
             fprintf(stderr, "Failed to create thread\n");
             cleanup_client(new_client);
             mutex_lock(&server_state.clients_mutex);
             server_state.client_count--;
             mutex_unlock(&server_state.clients_mutex);
         } else {
-            CloseHandle(new_client->thread_id);  // Auto cleanup
+            pthread_detach(new_client->thread_id);  // Auto cleanup
         }
     }
     

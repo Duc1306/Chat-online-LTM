@@ -3,18 +3,18 @@
 
 #include <stdint.h>
 #include <time.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
-
-#pragma comment(lib, "ws2_32.lib")
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 // ===========================
-// WINDOWS SOCKET TYPES
+// LINUX SOCKET TYPES
 // ===========================
 
-typedef SOCKET socket_t;
-#define socklen_t int
+typedef int socket_t;
+#define INVALID_SOCKET -1
+#define SOCKET_ERROR -1
 
 // ===========================
 // CONSTANTS - Dùng chung cho Client & Server

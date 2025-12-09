@@ -3,11 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <winsock2.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #include <sys/stat.h>
-#include <direct.h>
-
-#define mkdir(path, mode) _mkdir(path)
+#include <sys/types.h>
 
 // ===========================
 // 7. OFFLINE MESSAGES
