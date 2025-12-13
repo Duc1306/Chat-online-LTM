@@ -126,9 +126,58 @@ int send_online_users_list(int client_socket) {
     mutex_unlock(&server_state.users_mutex);
     
     Message response;
-    create_response_message(&response, MSG_GET_ONLINE_USERS, "SERVER", "", user_list);
+    create_response_message(&response, MSG_ONLINE_USERS_LIST, "SERVER", "", user_list);
     
     return send_message_struct(client_socket, &response);
+}
+
+/**
+ * Gửi danh sách bạn bè cho user
+ */
+void send_friend_list(const char *username) {
+    if (username == NULL) return;
+    
+    int client_socket = find_client_socket(username);
+    if (client_socket < 0) {
+        printf("[DEBUG] send_friend_list: User '%s' not online\n", username);
+        return;
+    }
+    
+    char friend_list[BUFFER_SIZE] = "";
+    int count = 0;
+    
+    mutex_lock(&server_state.file_mutex);
+    FILE *fp = fopen("friendships.txt", "r");
+    if (fp != NULL) {
+        char line[512];
+        while (fgets(line, sizeof(line), fp)) {
+            char user1[MAX_USERNAME_LEN], user2[MAX_USERNAME_LEN], status[20];
+            if (sscanf(line, "%[^|]|%[^|]|%s", user1, user2, status) == 3) {
+                if (strcmp(status, "accepted") == 0) {
+                    const char *friend_name = NULL;
+                    if (strcmp(user1, username) == 0) {
+                        friend_name = user2;
+                    } else if (strcmp(user2, username) == 0) {
+                        friend_name = user1;
+                    }
+                    
+                    if (friend_name) {
+                        if (count > 0) {
+                            strcat(friend_list, ",");
+                        }
+                        strcat(friend_list, friend_name);
+                        count++;
+                    }
+                }
+            }
+        }
+        fclose(fp);
+    }
+    mutex_unlock(&server_state.file_mutex);
+    
+    Message response;
+    create_response_message(&response, MSG_FRIEND_LIST, "SERVER", username, friend_list);
+    send_message_struct(client_socket, &response);
 }
 
 // ===========================
@@ -747,6 +796,10 @@ void handle_friend_accept(Message *msg) {
         if (from_socket >= 0) {
             send_message_struct(from_socket, &notify_msg);
         }
+        
+        // Gửi lại danh sách friends cho cả 2 người
+        send_friend_list(from_user);  // Người chấp nhận
+        send_friend_list(to_user);    // Người gửi lời mời
     } else {
         remove("friendships_temp.txt");
         

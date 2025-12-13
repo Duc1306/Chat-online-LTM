@@ -69,6 +69,7 @@ int find_user_socket(const char *username);
 int add_online_user(const char *username, int socket_fd);
 int remove_online_user(const char *username);
 int send_online_users_list(int client_socket);
+void send_friend_list(const char *username);
 
 // Message handling
 int broadcast_message(const Message *msg, const char *exclude_user);
