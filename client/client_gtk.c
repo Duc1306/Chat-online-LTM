@@ -314,6 +314,8 @@ gboolean show_friend_request_dialog_idle(gpointer data) {
     // from = current_username (tự động set trong send_request)
     if (response == GTK_RESPONSE_YES) {
         send_request(MSG_FRIEND_ACCEPT, "", req_data->username);
+        // Refresh friend list ngay sau khi accept
+        send_request(MSG_GET_FRIENDS, "", "");
     } else {
         send_request(MSG_FRIEND_REJECT, "", req_data->username);
     }
@@ -413,7 +415,53 @@ void process_message(const char *raw_data) {
             break;
             
         case MSG_NOTIFICATION:
-            g_idle_add(append_chat_idle, g_strdup_printf("[NOTIFICATION] %s\n", msg.content));
+            // Check if this is available groups notification
+            if (strcmp(msg.extra, "AVAILABLE_GROUPS") == 0) {
+                update_group_list(msg.content);
+            } else {
+                g_idle_add(append_chat_idle, g_strdup_printf("[NOTIFICATION] %s\n", msg.content));
+            }
+            break;
+            
+        case MSG_GROUP_JOIN:
+            snprintf(buffer, sizeof(buffer), "[GROUP] %s joined group %s\n", msg.content, msg.extra);
+            g_idle_add(append_chat_idle, g_strdup(buffer));
+            // Auto refresh groups list
+            send_request(MSG_GET_GROUPS, "", "");
+            break;
+            
+        case MSG_GROUP_LEAVE:
+            snprintf(buffer, sizeof(buffer), "[NHÓM %s] %s\n", msg.extra, msg.content);
+            g_idle_add(append_chat_idle, g_strdup(buffer));
+            // Auto refresh groups list
+            send_request(MSG_GET_GROUPS, "", "");
+            break;
+            
+        case MSG_GROUP_INVITE:
+            snprintf(buffer, sizeof(buffer), "Group invite from %s to join group: %s", msg.from, msg.extra);
+            show_info_dialog(buffer);
+            // Auto accept and join
+            send_request(MSG_GROUP_JOIN, msg.extra, "");
+            break;
+            
+        case MSG_FRIEND_REMOVE:
+            snprintf(buffer, sizeof(buffer), "%s removed you from their friend list", msg.from);
+            show_info_dialog(buffer);
+            send_request(MSG_GET_FRIENDS, "", "");  // Refresh friend list
+            break;
+            
+        case MSG_FRIEND_ACCEPT:
+            snprintf(buffer, sizeof(buffer), "[FRIEND] %s accepted your friend request!", msg.from);
+            g_idle_add(append_chat_idle, g_strdup(buffer));
+            g_idle_add(append_chat_idle, g_strdup("\n"));
+            // Auto refresh friend list
+            send_request(MSG_GET_FRIENDS, "", "");
+            break;
+            
+        case MSG_FRIEND_REJECT:
+            snprintf(buffer, sizeof(buffer), "[FRIEND] %s rejected your friend request", msg.from);
+            g_idle_add(append_chat_idle, g_strdup(buffer));
+            g_idle_add(append_chat_idle, g_strdup("\n"));
             break;
             
         case MSG_FRIEND_REQUEST:
@@ -512,6 +560,9 @@ void on_btn_login_clicked(GtkWidget *widget, gpointer data) {
     char content[256];
     snprintf(content, sizeof(content), "%s|%s", username, password);
     send_request(MSG_LOGIN, content, "");
+    
+    // Clear password after sending
+    gtk_entry_set_text(GTK_ENTRY(entry_password), "");
 }
 
 void on_btn_register_clicked(GtkWidget *widget, gpointer data) {
@@ -544,6 +595,9 @@ void on_btn_register_clicked(GtkWidget *widget, gpointer data) {
     char content[256];
     snprintf(content, sizeof(content), "%s|%s", username, password);
     send_request(MSG_REGISTER, content, "");
+    
+    // Clear password after sending
+    gtk_entry_set_text(GTK_ENTRY(entry_password), "");
 }
 
 void on_btn_send_clicked(GtkWidget *widget, gpointer data) {
@@ -597,12 +651,33 @@ void on_friend_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data)
     GtkWidget *label = gtk_bin_get_child(GTK_BIN(row));
     const char *username = gtk_label_get_text(GTK_LABEL(label));
     
-    strncpy(target_name, username, MAX_USERNAME_LEN - 1);
-    is_group_chat = false;
+    // Show dialog with options
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
+                                               GTK_DIALOG_DESTROY_WITH_PARENT,
+                                               GTK_MESSAGE_QUESTION,
+                                               GTK_BUTTONS_NONE,
+                                               "Friend: %s", username);
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Chat", 1);
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Remove Friend", 2);
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL);
     
-    char buffer[256];
-    snprintf(buffer, sizeof(buffer), "Chatting with friend: %s", target_name);
-    gtk_label_set_text(GTK_LABEL(label_chatting_with), buffer);
+    int response = gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+    
+    if (response == 1) {
+        // Chat
+        strncpy(target_name, username, MAX_USERNAME_LEN - 1);
+        is_group_chat = false;
+        
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), "Chatting with friend: %s", target_name);
+        gtk_label_set_text(GTK_LABEL(label_chatting_with), buffer);
+    } else if (response == 2) {
+        // Remove friend
+        send_request(MSG_FRIEND_REMOVE, "", username);
+        show_info_dialog("Friend removed!");
+        send_request(MSG_GET_FRIENDS, "", "");  // Refresh friend list
+    }
 }
 
 void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
@@ -612,7 +687,7 @@ void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) 
     GtkWidget *label = gtk_bin_get_child(GTK_BIN(row));
     const char *group_name = gtk_label_get_text(GTK_LABEL(label));
     
-    // Show dialog to join group or send group message
+    // Show dialog to join group, invite members, or send group message
     GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
                                                GTK_DIALOG_DESTROY_WITH_PARENT,
                                                GTK_MESSAGE_QUESTION,
@@ -620,6 +695,7 @@ void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) 
                                                "Group: %s", group_name);
     gtk_dialog_add_button(GTK_DIALOG(dialog), "Join Group", 1);
     gtk_dialog_add_button(GTK_DIALOG(dialog), "Chat in Group", 2);
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Leave Group", 3);
     gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL);
     
     int response = gtk_dialog_run(GTK_DIALOG(dialog));
@@ -627,7 +703,15 @@ void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) 
     
     if (response == 1) {
         // Join group
-        send_request(MSG_GROUP_JOIN, group_name, "");
+        Message msg;
+        create_response_message(&msg, MSG_GROUP_JOIN, current_username, "", "");
+        strncpy(msg.extra, group_name, sizeof(msg.extra) - 1);
+        
+        char buffer[BUFFER_SIZE];
+        int len = serialize_message(&msg, buffer, sizeof(buffer));
+        if (len > 0) {
+            send_packet(buffer, len);
+        }
         show_info_dialog("Join request sent!");
     } else if (response == 2) {
         // Set as chat target
@@ -636,6 +720,19 @@ void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) 
         char buffer[256];
         snprintf(buffer, sizeof(buffer), "Group chat: %s", target_name);
         gtk_label_set_text(GTK_LABEL(label_chatting_with), buffer);
+    } else if (response == 3) {
+        // Leave group
+        Message msg;
+        create_response_message(&msg, MSG_GROUP_LEAVE, current_username, "", "");
+        strncpy(msg.extra, group_name, sizeof(msg.extra) - 1);
+        
+        char buffer[BUFFER_SIZE];
+        int len = serialize_message(&msg, buffer, sizeof(buffer));
+        if (len > 0) {
+            send_packet(buffer, len);
+        }
+        show_info_dialog("Left group!");
+        send_request(MSG_GET_GROUPS, "", "");  // Refresh group list
     }
 }
 
@@ -663,8 +760,101 @@ void on_btn_create_group_clicked(GtkWidget *widget, gpointer data) {
         return;
     }
     
-    send_request(MSG_GROUP_CREATE, group_name, "");
-    gtk_entry_set_text(GTK_ENTRY(entry_group_name), "");
+    // Tạo dialog để chọn ít nhất 2 bạn bè
+    GtkWidget *dialog = gtk_dialog_new_with_buttons("Select Friends for Group",
+                                                     GTK_WINDOW(window),
+                                                     GTK_DIALOG_MODAL,
+                                                     "Create", GTK_RESPONSE_OK,
+                                                     "Cancel", GTK_RESPONSE_CANCEL,
+                                                     NULL);
+    
+    GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    gtk_container_set_border_width(GTK_CONTAINER(content_area), 10);
+    
+    GtkWidget *label = gtk_label_new("Select at least 2 friends to create a group:");
+    gtk_box_pack_start(GTK_BOX(content_area), label, FALSE, FALSE, 10);
+    
+    // Tạo scrolled window cho danh sách checkboxes
+    GtkWidget *scrolled = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), 
+                                   GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request(scrolled, 300, 200);
+    
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_container_add(GTK_CONTAINER(scrolled), vbox);
+    gtk_box_pack_start(GTK_BOX(content_area), scrolled, TRUE, TRUE, 10);
+    
+    // Tìm danh sách bạn bè và tạo checkboxes
+    GList *children = gtk_container_get_children(GTK_CONTAINER(listbox_friends));
+    int friend_count = 0;
+    GSList *checkbox_list = NULL;
+    
+    for (GList *iter = children; iter != NULL; iter = g_list_next(iter)) {
+        GtkWidget *row = GTK_WIDGET(iter->data);
+        GtkWidget *label_widget = gtk_bin_get_child(GTK_BIN(row));
+        if (label_widget) {
+            const char *friend_name = gtk_label_get_text(GTK_LABEL(label_widget));
+            GtkWidget *checkbox = gtk_check_button_new_with_label(friend_name);
+            gtk_box_pack_start(GTK_BOX(vbox), checkbox, FALSE, FALSE, 2);
+            checkbox_list = g_slist_append(checkbox_list, checkbox);
+            friend_count++;
+        }
+    }
+    g_list_free(children);
+    
+    if (friend_count < 2) {
+        gtk_widget_destroy(dialog);
+        g_slist_free(checkbox_list);
+        show_error_dialog("You need at least 2 friends to create a group!");
+        return;
+    }
+    
+    gtk_widget_show_all(dialog);
+    
+    int response = gtk_dialog_run(GTK_DIALOG(dialog));
+    
+    if (response == GTK_RESPONSE_OK) {
+        // Đếm số bạn bè được chọn và tạo danh sách
+        char selected_friends[BUFFER_SIZE] = "";
+        int selected_count = 0;
+        
+        for (GSList *iter = checkbox_list; iter != NULL; iter = g_slist_next(iter)) {
+            GtkWidget *checkbox = GTK_WIDGET(iter->data);
+            if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(checkbox))) {
+                const char *friend_name = gtk_button_get_label(GTK_BUTTON(checkbox));
+                if (selected_count > 0) {
+                    strcat(selected_friends, ",");
+                }
+                strcat(selected_friends, friend_name);
+                selected_count++;
+            }
+        }
+        
+        if (selected_count < 2) {
+            show_error_dialog("Please select at least 2 friends!");
+        } else {
+            // Gửi request với danh sách bạn bè
+            Message msg;
+            create_response_message(&msg, MSG_GROUP_CREATE, current_username, "", group_name);
+            
+            // msg.extra = friend1,friend2,friend3,...
+            strncpy(msg.extra, selected_friends, sizeof(msg.extra) - 1);
+            
+            char buffer[BUFFER_SIZE];
+            int len = serialize_message(&msg, buffer, sizeof(buffer));
+            if (len > 0) {
+                send_packet(buffer, len);
+                char success_msg[256];
+                snprintf(success_msg, sizeof(success_msg), 
+                        "Group creation request sent with %d friends!", selected_count);
+                show_info_dialog(success_msg);
+                gtk_entry_set_text(GTK_ENTRY(entry_group_name), "");
+            }
+        }
+    }
+    
+    g_slist_free(checkbox_list);
+    gtk_widget_destroy(dialog);
 }
 
 void on_btn_join_group_clicked(GtkWidget *widget, gpointer data) {

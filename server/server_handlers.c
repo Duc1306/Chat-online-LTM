@@ -132,9 +132,10 @@ int send_online_users_list(int client_socket) {
 }
 
 /**
- * Gửi danh sách bạn bè cho user
+ * Gửi danh sách bạn bè cho user (auto-find socket)
+ * Dùng cho real-time updates
  */
-void send_friend_list(const char *username) {
+void send_friend_list_auto(const char *username) {
     if (username == NULL) return;
     
     int client_socket = find_client_socket(username);
@@ -265,10 +266,51 @@ int handle_private_chat_end(const Message *msg) {
 // ===========================
 
 /**
+ * Đếm số bạn bè accepted của một user
+ */
+int count_accepted_friends(const char *username) {
+    if (username == NULL) return 0;
+    
+    int friend_count = 0;
+    
+    mutex_lock(&server_state.file_mutex);
+    FILE *fp = fopen("friendships.txt", "r");
+    if (fp != NULL) {
+        char line[512];
+        while (fgets(line, sizeof(line), fp)) {
+            char user1[MAX_USERNAME_LEN], user2[MAX_USERNAME_LEN], status[20];
+            if (sscanf(line, "%[^|]|%[^|]|%s", user1, user2, status) == 3) {
+                if (strcmp(status, "accepted") == 0) {
+                    if ((strcmp(user1, username) == 0 || strcmp(user2, username) == 0)) {
+                        friend_count++;
+                    }
+                }
+            }
+        }
+        fclose(fp);
+    }
+    mutex_unlock(&server_state.file_mutex);
+    
+    return friend_count;
+}
+
+/**
  * Tạo nhóm chat mới
+ * Yêu cầu: Phải có ít nhất 3 bạn bè (accepted) để tạo nhóm
+ * msg->content = group_name
+ * msg->extra = friend1,friend2,friend3 (3 bạn bè được chọn, cách nhau bởi dấu phẩy)
  */
 int create_group(const char *group_name, const char *creator) {
     if (group_name == NULL || creator == NULL) return -1;
+    
+    // Kiểm tra creator có ít nhất 2 bạn bè không (tổng 3 người)
+    int friend_count = count_accepted_friends(creator);
+    
+    if (friend_count < 2) {
+        printf("[GROUP] Cannot create group '%s': Need at least 2 accepted friends (have %d)\n", 
+               group_name, friend_count);
+        return -2;  // Special error code for "not enough friends"
+    }
     
     mutex_lock(&server_state.groups_mutex);
     
@@ -313,22 +355,155 @@ int create_group(const char *group_name, const char *creator) {
 }
 
 /**
+ * Tạo nhóm với danh sách bạn bè đã chọn
+ * Được gọi từ MSG_GROUP_CREATE handler
+ * members_list = friend1,friend2,friend3 (3 bạn bè được chọn)
+ */
+int create_group_with_friends(const char *group_name, const char *creator, const char *members_list) {
+    if (group_name == NULL || creator == NULL || members_list == NULL) return -1;
+    
+    // Kiểm tra creator có ít nhất 2 bạn bè không (tổng 3 người)
+    int friend_count = count_accepted_friends(creator);
+    
+    if (friend_count < 2) {
+        printf("[GROUP] Cannot create group '%s': Need at least 2 accepted friends (have %d)\n", 
+               group_name, friend_count);
+        return -2;
+    }
+    
+    mutex_lock(&server_state.groups_mutex);
+    
+    // Kiểm tra nhóm đã tồn tại chưa
+    for (int i = 0; i < server_state.group_count; i++) {
+        if (strcmp(server_state.groups[i].group_name, group_name) == 0) {
+            mutex_unlock(&server_state.groups_mutex);
+            printf("[GROUP] Group '%s' already exists\n", group_name);
+            return -1;
+        }
+    }
+    
+    // Kiểm tra số lượng nhóm
+    if (server_state.group_count >= MAX_GROUPS) {
+        mutex_unlock(&server_state.groups_mutex);
+        printf("[GROUP] Maximum groups reached\n");
+        return -1;
+    }
+    
+    // Tạo nhóm mới
+    Group *new_group = &server_state.groups[server_state.group_count];
+    strncpy(new_group->group_name, group_name, MAX_GROUP_NAME_LEN - 1);
+    strncpy(new_group->creator, creator, MAX_USERNAME_LEN - 1);
+    strncpy(new_group->members[0], creator, MAX_USERNAME_LEN - 1);
+    new_group->member_count = 1;
+    
+    // Parse members_list và thêm vào nhóm
+    char members_copy[BUFFER_SIZE];
+    strncpy(members_copy, members_list, sizeof(members_copy) - 1);
+    
+    char *member = strtok(members_copy, ",");
+    while (member != NULL && new_group->member_count < MAX_GROUP_MEMBERS) {
+        // Trim whitespace
+        while (*member == ' ') member++;
+        
+        if (strlen(member) > 0) {
+            strncpy(new_group->members[new_group->member_count], member, MAX_USERNAME_LEN - 1);
+            new_group->member_count++;
+        }
+        member = strtok(NULL, ",");
+    }
+    
+    new_group->created_at = time(NULL);
+    server_state.group_count++;
+    
+    mutex_unlock(&server_state.groups_mutex);
+    
+    // Lưu vào file
+    save_group_to_file("groups.txt", new_group);
+    
+    printf("[GROUP] Created group '%s' by '%s' with %d members\n", 
+           group_name, creator, new_group->member_count);
+    
+    char log_msg[512];
+    snprintf(log_msg, sizeof(log_msg), "Group created: %s by %s with members: %s", 
+             group_name, creator, members_list);
+    log_server_event("GROUP_CREATE", log_msg);
+    
+    return 0;
+}
+
+/**
  * Xử lý lời mời tham gia nhóm
+ * msg->from = người gửi lời mời (creator/owner)
+ * msg->to = người được mời
+ * msg->extra = group_name
  */
 int handle_group_invite(const Message *msg) {
     if (msg == NULL) return -1;
     
-    // msg->extra chứa group_name
-    // msg->to chứa username được mời
+    const char *inviter = msg->from;
+    const char *invitee = msg->to;
+    const char *group_name = msg->extra;
     
     printf("[GROUP] User '%s' invited '%s' to group '%s'\n", 
-           msg->from, msg->to, msg->extra);
+           inviter, invitee, group_name);
     
-    int receiver_socket = find_user_socket(msg->to);
+    // Kiểm tra inviter là member của group này không
+    mutex_lock(&server_state.groups_mutex);
+    
+    Group *group = NULL;
+    for (int i = 0; i < server_state.group_count; i++) {
+        if (strcmp(server_state.groups[i].group_name, group_name) == 0) {
+            group = &server_state.groups[i];
+            break;
+        }
+    }
+    
+    if (group == NULL) {
+        mutex_unlock(&server_state.groups_mutex);
+        // Group không tồn tại, gửi lỗi cho inviter
+        Message error;
+        create_response_message(&error, MSG_ERROR, "SERVER", inviter, "Group not found");
+        int inviter_socket = find_user_socket(inviter);
+        if (inviter_socket >= 0) {
+            send_message_struct(inviter_socket, &error);
+        }
+        return -1;
+    }
+    
+    // Kiểm tra invitee có phải member của group chưa
+    for (int i = 0; i < group->member_count; i++) {
+        if (strcmp(group->members[i], invitee) == 0) {
+            mutex_unlock(&server_state.groups_mutex);
+            // Đã là member rồi
+            Message error;
+            create_response_message(&error, MSG_ERROR, "SERVER", inviter, 
+                                   "User is already a member of this group");
+            int inviter_socket = find_user_socket(inviter);
+            if (inviter_socket >= 0) {
+                send_message_struct(inviter_socket, &error);
+            }
+            return -1;
+        }
+    }
+    
+    mutex_unlock(&server_state.groups_mutex);
+    
+    // Gửi lời mời đến người được mời
+    int receiver_socket = find_user_socket(invitee);
     if (receiver_socket != -1) {
         send_message_struct(receiver_socket, msg);
     } else {
+        // Người offline, lưu offline message
         save_offline_message(msg);
+    }
+    
+    // Thông báo cho inviter rằng lời mời đã gửi
+    Message success;
+    create_response_message(&success, MSG_RESPONSE_SUCCESS, "SERVER", inviter, 
+                           "Invitation sent successfully");
+    int inviter_socket = find_user_socket(inviter);
+    if (inviter_socket >= 0) {
+        send_message_struct(inviter_socket, &success);
     }
     
     return 0;
@@ -380,7 +555,14 @@ int handle_group_join(const char *group_name, const char *username) {
     
     printf("[GROUP] User '%s' joined group '%s'\n", username, group_name);
     
-    // Thông báo cho các members khác
+    // Gửi lại group list cho người mới join (để refresh)
+    int joiner_socket = find_user_socket(username);
+    if (joiner_socket != -1) {
+        send_user_groups_list(joiner_socket, username);
+        send_all_available_groups(joiner_socket, username);
+    }
+    
+    // Thông báo cho các members khác và refresh group list của họ
     Message notification;
     create_response_message(&notification, MSG_GROUP_JOIN, "SERVER", "", username);
     strncpy(notification.extra, group_name, MAX_MESSAGE_LEN - 1);
@@ -391,6 +573,8 @@ int handle_group_join(const char *group_name, const char *username) {
             int member_socket = find_user_socket(group->members[i]);
             if (member_socket != -1) {
                 send_message_struct(member_socket, &notification);
+                // Refresh group list của member
+                send_user_groups_list(member_socket, group->members[i]);
             }
         }
     }
@@ -405,21 +589,40 @@ int handle_group_join(const char *group_name, const char *username) {
 int handle_group_leave(const char *group_name, const char *username) {
     if (group_name == NULL || username == NULL) return -1;
     
+    printf("[DEBUG] handle_group_leave: %s leaving %s\n", username, group_name);
+    
     mutex_lock(&server_state.groups_mutex);
     
     // Tìm nhóm
     Group *group = NULL;
+    int group_index = -1;
     for (int i = 0; i < server_state.group_count; i++) {
         if (strcmp(server_state.groups[i].group_name, group_name) == 0) {
             group = &server_state.groups[i];
+            group_index = i;
             break;
         }
     }
     
     if (group == NULL) {
         mutex_unlock(&server_state.groups_mutex);
+        printf("[DEBUG] Group '%s' not found\n", group_name);
         return -1;
     }
+    
+    // Lưu danh sách members TRƯỚC KHI xóa (để gửi thông báo)
+    char members_to_notify[MAX_GROUP_MEMBERS][MAX_USERNAME_LEN];
+    int notify_count = 0;
+    
+    for (int i = 0; i < group->member_count; i++) {
+        if (strcmp(group->members[i], username) != 0) {
+            // Không bao gồm người rời nhóm
+            strncpy(members_to_notify[notify_count], group->members[i], MAX_USERNAME_LEN - 1);
+            notify_count++;
+        }
+    }
+    
+    printf("[DEBUG] Will notify %d members about %s leaving\n", notify_count, username);
     
     // Xóa member
     int found = -1;
@@ -432,6 +635,7 @@ int handle_group_leave(const char *group_name, const char *username) {
     
     if (found == -1) {
         mutex_unlock(&server_state.groups_mutex);
+        printf("[DEBUG] User '%s' not found in group\n", username);
         return -1;
     }
     
@@ -441,23 +645,41 @@ int handle_group_leave(const char *group_name, const char *username) {
     }
     group->member_count--;
     
+    printf("[DEBUG] Group '%s' now has %d members\n", group_name, group->member_count);
+    
     mutex_unlock(&server_state.groups_mutex);
+    
+    // Update file groups.txt
+     save_all_groups_to_file("groups.txt");
     
     printf("[GROUP] User '%s' left group '%s'\n", username, group_name);
     
-    // Thông báo cho các members còn lại
+    // Gửi lại group list cho người rời nhóm (để refresh)
+    int leaver_socket = find_user_socket(username);
+    printf("[DEBUG] Leaver socket: %d\n", leaver_socket);
+    if (leaver_socket != -1) {
+        send_user_groups_list(leaver_socket, username);
+        send_all_available_groups(leaver_socket, username);
+    }
+    
+    // Thông báo cho các members còn lại và refresh group list của họ
     Message notification;
-    create_response_message(&notification, MSG_GROUP_LEAVE, "SERVER", "", username);
+    char leave_message[MAX_MESSAGE_LEN];
+    snprintf(leave_message, sizeof(leave_message), "%s đã rời khỏi nhóm", username);
+    create_response_message(&notification, MSG_GROUP_LEAVE, "SERVER", "", leave_message);
     strncpy(notification.extra, group_name, MAX_MESSAGE_LEN - 1);
     
-    mutex_lock(&server_state.groups_mutex);
-    for (int i = 0; i < group->member_count; i++) {
-        int member_socket = find_user_socket(group->members[i]);
+    for (int i = 0; i < notify_count; i++) {
+        int member_socket = find_user_socket(members_to_notify[i]);
+        printf("[DEBUG] Notifying member '%s' (socket %d)\n", members_to_notify[i], member_socket);
         if (member_socket != -1) {
             send_message_struct(member_socket, &notification);
+            // Refresh group list của member
+            send_user_groups_list(member_socket, members_to_notify[i]);
         }
     }
-    mutex_unlock(&server_state.groups_mutex);
+    
+    printf("[DEBUG] Sent notifications to %d members\n", notify_count);
     
     return 0;
 }
@@ -592,6 +814,38 @@ int save_group_to_file(const char *filename, const Group *group) {
     }
     
     fprintf(fp, "|%ld\n", group->created_at);
+    fclose(fp);
+    
+    return 0;
+}
+
+/**
+ * Save tất cả groups vào file (overwrite toàn bộ file)
+ */
+int save_all_groups_to_file(const char *filename) {
+    FILE *fp = fopen(filename, "w");
+    if (fp == NULL) {
+        perror("Failed to open groups file for writing");
+        return -1;
+    }
+    
+    mutex_lock(&server_state.groups_mutex);
+    
+    for (int i = 0; i < server_state.group_count; i++) {
+        Group *group = &server_state.groups[i];
+        fprintf(fp, "%s|%s|", group->group_name, group->creator);
+        
+        for (int j = 0; j < group->member_count; j++) {
+            fprintf(fp, "%s", group->members[j]);
+            if (j < group->member_count - 1) {
+                fprintf(fp, ",");
+            }
+        }
+        
+        fprintf(fp, "|%ld\n", group->created_at);
+    }
+    
+    mutex_unlock(&server_state.groups_mutex);
     fclose(fp);
     
     return 0;
@@ -778,6 +1032,22 @@ void handle_friend_accept(Message *msg) {
         remove("friendships.txt");
         rename("friendships_temp.txt", "friendships.txt");
         
+        printf("[DEBUG] File updated, now unlocking mutex and sending friend lists\n");
+        mutex_unlock(&server_state.file_mutex);
+        
+        // Gửi danh sách friends mới cho cả 2 người (để auto-refresh)
+        int from_socket = find_client_socket(from_user);
+        int to_socket = find_client_socket(to_user);
+        
+        printf("[DEBUG] Sending friend list to %s (socket %d)\n", from_user, from_socket);
+        if (from_socket >= 0) {
+            send_friends_list(from_socket, from_user);  // Người chấp nhận
+        }
+        printf("[DEBUG] Sending friend list to %s (socket %d)\n", to_user, to_socket);
+        if (to_socket >= 0) {
+            send_friends_list(to_socket, to_user);      // Người gửi lời mời
+        }
+        
         // Thông báo cho cả 2 người
         Message notify_msg;
         char notify_content[MAX_MESSAGE_LEN];
@@ -785,23 +1055,20 @@ void handle_friend_accept(Message *msg) {
         // Thông báo cho người gửi lời mời
         snprintf(notify_content, sizeof(notify_content), "%s accepted your friend request", from_user);
         create_response_message(&notify_msg, MSG_FRIEND_ACCEPT, from_user, to_user, notify_content);
-        int to_socket = find_client_socket(to_user);
         if (to_socket >= 0) {
             send_message_struct(to_socket, &notify_msg);
         }
         
         // Success cho người chấp nhận
         create_response_message(&notify_msg, MSG_RESPONSE_SUCCESS, "SERVER", from_user, "Friend request accepted");
-        int from_socket = find_client_socket(from_user);
         if (from_socket >= 0) {
             send_message_struct(from_socket, &notify_msg);
         }
         
-        // Gửi lại danh sách friends cho cả 2 người
-        send_friend_list(from_user);  // Người chấp nhận
-        send_friend_list(to_user);    // Người gửi lời mời
+        printf("[FRIEND_ACCEPT] Successfully added friendship between %s and %s\n", from_user, to_user);
     } else {
         remove("friendships_temp.txt");
+        mutex_unlock(&server_state.file_mutex);
         
         Message error_msg;
         create_response_message(&error_msg, MSG_RESPONSE_ERROR, "SERVER", from_user, "Friend request not found");
@@ -810,8 +1077,6 @@ void handle_friend_accept(Message *msg) {
             send_message_struct(from_socket, &error_msg);
         }
     }
-    
-    mutex_unlock(&server_state.file_mutex);
 }
 
 /**
@@ -954,23 +1219,34 @@ void handle_friend_remove(Message *msg) {
         remove("friendships.txt");
         rename("friendships_temp.txt", "friendships.txt");
         
+        // Gửi danh sách friends mới cho cả 2 người (để auto-refresh)
+        int from_socket = find_client_socket(from_user);
+        int to_socket = find_client_socket(to_user);
+        
+        if (from_socket >= 0) {
+            send_friends_list(from_socket, from_user);  // Người xóa
+        }
+        if (to_socket >= 0) {
+            send_friends_list(to_socket, to_user);      // Người bị xóa
+        }
+        
         // Thông báo cho bạn bị xóa
         Message notify_msg;
         char notify_content[MAX_MESSAGE_LEN];
         snprintf(notify_content, sizeof(notify_content), "%s removed you from their friend list", from_user);
         create_response_message(&notify_msg, MSG_FRIEND_REMOVE, from_user, to_user, notify_content);
         
-        int to_socket = find_client_socket(to_user);
         if (to_socket >= 0) {
             send_message_struct(to_socket, &notify_msg);
         }
         
         // Success cho người xóa
         create_response_message(&notify_msg, MSG_RESPONSE_SUCCESS, "SERVER", from_user, "Friend removed");
-        int from_socket = find_client_socket(from_user);
         if (from_socket >= 0) {
             send_message_struct(from_socket, &notify_msg);
         }
+        
+        printf("[FRIEND_REMOVE] Successfully removed friendship between %s and %s\n", from_user, to_user);
     } else {
         remove("friendships_temp.txt");
         
@@ -996,18 +1272,28 @@ int send_friends_list(int client_socket, const char *username) {
     
     mutex_lock(&server_state.file_mutex);
     
+    printf("[DEBUG] Reading friendships.txt for user: %s\n", username);
+    
     FILE *fp = fopen("friendships.txt", "r");
     if (fp != NULL) {
         char line[512];
+        int line_num = 0;
         while (fgets(line, sizeof(line), fp)) {
+            line_num++;
+            printf("[DEBUG] Line %d: %s", line_num, line);
+            
             char user1[MAX_USERNAME_LEN], user2[MAX_USERNAME_LEN], status[20];
             if (sscanf(line, "%[^|]|%[^|]|%s", user1, user2, status) == 3) {
+                printf("[DEBUG] Parsed: user1='%s', user2='%s', status='%s'\n", user1, user2, status);
+                
                 if (strcmp(status, "accepted") == 0) {
                     const char *friend_name = NULL;
                     if (strcmp(user1, username) == 0) {
                         friend_name = user2;
+                        printf("[DEBUG] Found friend: %s (user1 match)\n", friend_name);
                     } else if (strcmp(user2, username) == 0) {
                         friend_name = user1;
+                        printf("[DEBUG] Found friend: %s (user2 match)\n", friend_name);
                     }
                     
                     if (friend_name != NULL) {
@@ -1018,15 +1304,60 @@ int send_friends_list(int client_socket, const char *username) {
                         count++;
                     }
                 }
+            } else {
+                printf("[DEBUG] Failed to parse line\n");
             }
         }
         fclose(fp);
+    } else {
+        printf("[DEBUG] Failed to open friendships.txt\n");
     }
     
+    printf("[DEBUG] Total friends found: %d\n", count);
     mutex_unlock(&server_state.file_mutex);
     
     Message response;
     create_response_message(&response, MSG_FRIEND_LIST, "SERVER", username, friends_list);
+    
+    printf("[DEBUG] Sending friend list to %s: %s\n", username, friends_list);
+    return send_message_struct(client_socket, &response);
+}
+
+/**
+ * Gửi danh sách tất cả groups có sẵn (để discover/join)
+ * Format: group1|group2|group3 (hoặc group1:member_count|group2:member_count)
+ */
+int send_all_available_groups(int client_socket, const char *username) {
+    char groups_list[BUFFER_SIZE] = "";
+    int count = 0;
+    
+    mutex_lock(&server_state.groups_mutex);
+    
+    for (int i = 0; i < server_state.group_count; i++) {
+        // Kiểm tra user có phải member của group này không
+        int is_member = 0;
+        for (int j = 0; j < server_state.groups[i].member_count; j++) {
+            if (strcmp(server_state.groups[i].members[j], username) == 0) {
+                is_member = 1;
+                break;
+            }
+        }
+        
+        // Nếu chưa là member, thêm vào danh sách discover
+        if (!is_member) {
+            if (count > 0) {
+                strcat(groups_list, ",");
+            }
+            strcat(groups_list, server_state.groups[i].group_name);
+            count++;
+        }
+    }
+    
+    mutex_unlock(&server_state.groups_mutex);
+    
+    Message response;
+    create_response_message(&response, MSG_NOTIFICATION, "SERVER", username, groups_list);
+    strncpy(response.extra, "AVAILABLE_GROUPS", MAX_MESSAGE_LEN - 1);
     
     return send_message_struct(client_socket, &response);
 }

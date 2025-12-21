@@ -242,6 +242,8 @@ void InitGUI(HWND hwnd) {
 
     CreateWindow("STATIC", "Password:", WS_CHILD|WS_VISIBLE, 250, 250, 100, 20, hwnd, (HMENU)IDC_LBL_PASS, NULL, NULL);
     hEditPass = CreateWindow("EDIT", "", WS_CHILD|WS_VISIBLE|WS_BORDER|ES_PASSWORD, 350, 250, 200, 25, hwnd, (HMENU)IDC_EDIT_PASS, NULL, NULL);
+    // Ensure password field is empty
+    SetWindowText(hEditPass, "");
 
     CreateWindow("BUTTON", "LOGIN", WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON, 250, 300, 145, 35, hwnd, (HMENU)IDC_BTN_LOGIN, NULL, NULL);
     CreateWindow("BUTTON", "REGISTER", WS_CHILD|WS_VISIBLE, 405, 300, 145, 35, hwnd, (HMENU)IDC_BTN_REG, NULL, NULL);
@@ -333,8 +335,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (LOWORD(wParam) == IDC_BTN_LOGIN) {
                     SendRequest(MSG_LOGIN, content, "");
                     strcpy(current_username, user);
+                    SetWindowText(hEditPass, "");  // Clear password after login
                 } else {
                     SendRequest(MSG_REGISTER, content, "");
+                    SetWindowText(hEditPass, "");  // Clear password after register
                 }
             }
 

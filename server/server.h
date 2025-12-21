@@ -69,7 +69,7 @@ int find_user_socket(const char *username);
 int add_online_user(const char *username, int socket_fd);
 int remove_online_user(const char *username);
 int send_online_users_list(int client_socket);
-void send_friend_list(const char *username);
+void send_friend_list_auto(const char *username);
 
 // Message handling
 int broadcast_message(const Message *msg, const char *exclude_user);
@@ -84,10 +84,13 @@ void handle_friend_accept(Message *msg);
 void handle_friend_reject(Message *msg);
 void handle_friend_remove(Message *msg);
 int send_friends_list(int client_socket, const char *username);
+int send_all_available_groups(int client_socket, const char *username);
 int load_friendships_from_file(const char *filename);
 
 // Group management
 int create_group(const char *group_name, const char *creator);
+int create_group_with_friends(const char *group_name, const char *creator, const char *members_list);
+int count_accepted_friends(const char *username);
 int handle_group_invite(const Message *msg);
 int handle_group_join(const char *group_name, const char *username);
 int handle_group_leave(const char *group_name, const char *username);
@@ -95,6 +98,7 @@ int relay_group_message(const Message *msg);
 int send_user_groups_list(int client_socket, const char *username);
 int load_groups_from_file(const char *filename);
 int save_group_to_file(const char *filename, const Group *group);
+int save_all_groups_to_file(const char *filename);
 
 // Offline messages
 int save_offline_message(const Message *msg);

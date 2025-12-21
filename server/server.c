@@ -332,10 +332,6 @@ int handle_register(ClientConnection *client, const Message *msg) {
     
     // Parse username và password từ msg->content
     // Format: username|password
-    printf("[DEBUG] REGISTER - msg->content = '%s'\n", msg->content);
-    printf("[DEBUG] REGISTER - msg->from = '%s'\n", msg->from);
-    printf("[DEBUG] REGISTER - msg->to = '%s'\n", msg->to);
-    
     char username[MAX_USERNAME_LEN];
     char password[MAX_PASSWORD_LEN];
     
@@ -343,10 +339,7 @@ int handle_register(ClientConnection *client, const Message *msg) {
     strncpy(content_copy, msg->content, MAX_MESSAGE_LEN - 1);
     content_copy[MAX_MESSAGE_LEN - 1] = '\0';
     
-    printf("[DEBUG] content_copy = '%s'\n", content_copy);
-    
     char *token = strtok(content_copy, "|");
-    printf("[DEBUG] token1 (username) = '%s'\n", token ? token : "NULL");
     if (token == NULL) {
         create_response_message(&response, MSG_ERROR, "SERVER", msg->from, 
                                "Invalid registration format");
@@ -526,6 +519,12 @@ int handle_login(ClientConnection *client, const Message *msg) {
     // Gửi offline messages
     send_offline_messages(client->socket_fd, username);
     
+    // Gửi danh sách groups của user (user đã join)
+    send_user_groups_list(client->socket_fd, username);
+    
+    // Gửi danh sách groups có sẵn (user chưa join, để discover)
+    send_all_available_groups(client->socket_fd, username);
+    
     // Broadcast user online status
     Message online_msg;
     create_response_message(&online_msg, MSG_USER_ONLINE, "SERVER", "", username);
@@ -651,13 +650,51 @@ void *client_thread(void *arg) {
                 
             case MSG_GROUP_CREATE:
                 if (!client->is_authenticated) break;
-                create_group(msg.content, client->username);
                 {
+                    // msg.content = group_name
+                    // msg.extra = friend1,friend2,friend3
+                    int result = create_group_with_friends(msg.content, client->username, msg.extra);
                     Message response;
-                    create_response_message(&response, MSG_SUCCESS, "SERVER", 
-                                          client->username, "Group created");
+                    
+                    if (result == -2) {
+                        // Not enough friends (less than 2)
+                        create_response_message(&response, MSG_ERROR, "SERVER", 
+                                              client->username, 
+                                              "Need at least 2 accepted friends to create a group");
+                    } else if (result == -1) {
+                        // Group already exists or other error
+                        create_response_message(&response, MSG_ERROR, "SERVER", 
+                                              client->username, 
+                                              "Cannot create group (already exists or error)");
+                    } else {
+                        // Success
+                        create_response_message(&response, MSG_SUCCESS, "SERVER", 
+                                              client->username, "Group created successfully");
+                        
+                        // Gửi lời mời cho các bạn bè vừa thêm vào nhóm
+                        char members_copy[BUFFER_SIZE];
+                        strncpy(members_copy, msg.extra, sizeof(members_copy) - 1);
+                        char *member = strtok(members_copy, ",");
+                        while (member != NULL) {
+                            while (*member == ' ') member++;
+                            if (strlen(member) > 0) {
+                                Message invite;
+                                create_response_message(&invite, MSG_GROUP_INVITE, client->username, member, "");
+                                strncpy(invite.extra, msg.content, sizeof(invite.extra) - 1);
+                                
+                                int member_socket = find_user_socket(member);
+                                if (member_socket >= 0) {
+                                    send_message_struct(member_socket, &invite);
+                                } else {
+                                    save_offline_message(&invite);
+                                }
+                            }
+                            member = strtok(NULL, ",");
+                        }
+                    }
                     send_message_struct(client->socket_fd, &response);
                 }
+                break;
                 break;
                 
             case MSG_GROUP_INVITE:
