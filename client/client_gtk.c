@@ -21,6 +21,29 @@
 #include "protocol.h"
 
 // ===========================
+// FORWARD DECLARATIONS
+// ===========================
+
+// THÊM: Định nghĩa ChatTab struct TRƯỚC khi dùng trong forward declaration
+typedef struct {
+    char name[MAX_USERNAME_LEN];
+    bool is_group;
+    GtkWidget *textview;
+    GtkTextBuffer *buffer;
+    GtkWidget *vbox;  // THÊM: Lưu container
+    bool is_visible;
+    int page_num;
+} ChatTab;
+
+// Sau đó mới forward declare các hàm
+gboolean create_chat_tab_idle(gpointer data);
+gboolean append_to_chat_tab_idle(gpointer data);
+void append_to_chat_tab(const char *name, const char *text);
+void open_chat_tab(const char *name, bool is_group);
+ChatTab* find_chat_tab(const char *name);  // Bây giờ ChatTab đã được định nghĩa
+void on_chat_tab_close(GtkWidget *widget, gpointer data);
+
+// ===========================
 // GLOBAL STATE
 // ===========================
 int client_socket = -1;
@@ -65,6 +88,18 @@ GtkWidget *entry_group_name;
 GtkWidget *entry_join_group_name;
 GtkWidget *btn_create_group;
 
+// Switch view data structure
+typedef struct {
+    bool switch_to_chat;
+} SwitchViewData;
+
+// Chat tabs management
+GtkWidget *chat_notebook;
+
+#define MAX_CHAT_TABS 20
+ChatTab chat_tabs[MAX_CHAT_TABS];
+int chat_tab_count = 0;
+
 // ===========================
 // NETWORK FUNCTIONS
 // ===========================
@@ -86,7 +121,7 @@ int send_packet(const char *data, int len) {
 
 int recv_packet(char *buffer, size_t buffer_size) {
     uint32_t msg_length;
-    int total_received = 0;
+    size_t total_received = 0;  // ĐỔI: int -> size_t
     
     while (total_received < sizeof(uint32_t)) {
         int bytes = recv(client_socket, ((char *)&msg_length) + total_received,
@@ -99,7 +134,7 @@ int recv_packet(char *buffer, size_t buffer_size) {
     if (msg_length == 0 || msg_length > buffer_size - 1) return -1;
     
     total_received = 0;
-    while (total_received < msg_length) {
+    while (total_received < msg_length) {  // Bây giờ cùng kiểu size_t
         int bytes = recv(client_socket, buffer + total_received,
                         msg_length - total_received, 0);
         if (bytes <= 0) return bytes;
@@ -107,7 +142,7 @@ int recv_packet(char *buffer, size_t buffer_size) {
     }
     
     buffer[total_received] = '\0';
-    return total_received;
+    return (int)total_received;  // Cast về int khi return
 }
 
 void send_request(int type, const char *content, const char *to) {
@@ -124,6 +159,19 @@ void send_request(int type, const char *content, const char *to) {
 // ===========================
 // GUI UPDATE FUNCTIONS (Thread-safe)
 // ===========================
+
+gboolean switch_view_idle(gpointer data) {
+    SwitchViewData *view_data = (SwitchViewData *)data;
+    
+    if (view_data->switch_to_chat) {
+        gtk_stack_set_visible_child_name(GTK_STACK(main_stack), "chat");
+    } else {
+        gtk_stack_set_visible_child_name(GTK_STACK(main_stack), "login");
+    }
+    
+    g_free(view_data);
+    return FALSE;
+}
 
 gboolean append_chat_idle(gpointer data) {
     char *text = (char *)data;
@@ -332,20 +380,229 @@ void show_friend_request_dialog(const char *username) {
 }
 
 // ===========================
-// MESSAGE PROCESSING
+// CHAT TAB MANAGEMENT
 // ===========================
 
-typedef struct {
-    bool switch_to_chat;
-} SwitchViewData;
+ChatTab* find_chat_tab(const char *name) {
+    for (int i = 0; i < chat_tab_count; i++) {
+        if (strcmp(chat_tabs[i].name, name) == 0) {
+            return &chat_tabs[i];
+        }
+    }
+    return NULL;
+}
 
-gboolean switch_view_idle(gpointer data) {
-    SwitchViewData *view_data = (SwitchViewData *)data;
-    gtk_stack_set_visible_child_name(GTK_STACK(main_stack), 
-                                     view_data->switch_to_chat ? "chat" : "login");
-    g_free(view_data);
+void open_chat_tab(const char *name, bool is_group) {
+    is_group_chat = is_group;
+    strncpy(target_name, name, MAX_USERNAME_LEN - 1);
+    g_idle_add(create_chat_tab_idle, g_strdup(name));
+}
+
+gboolean append_to_chat_tab_idle(gpointer data) {
+    typedef struct {
+        char name[MAX_USERNAME_LEN];
+        char text[BUFFER_SIZE];
+    } ChatMessage;
+    
+    ChatMessage *msg = (ChatMessage *)data;
+    ChatTab *tab = find_chat_tab(msg->name);
+    
+    if (tab != NULL) {
+        GtkTextIter iter;
+        gtk_text_buffer_get_end_iter(tab->buffer, &iter);
+        gtk_text_buffer_insert(tab->buffer, &iter, msg->text, -1);
+        
+        // Auto scroll
+        GtkTextMark *mark = gtk_text_buffer_get_insert(tab->buffer);
+        gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(tab->textview), mark, 0.0, TRUE, 0.0, 1.0);
+    }
+    
+    g_free(data);
     return FALSE;
 }
+
+void on_chat_tab_close(GtkWidget *widget, gpointer data) {
+    (void)widget;
+    GtkWidget *vbox = GTK_WIDGET(data);
+    int page_num = gtk_notebook_page_num(GTK_NOTEBOOK(chat_notebook), vbox);
+    
+    if (page_num >= 0 && page_num < chat_tab_count) {
+        // Tìm tab tương ứng
+        ChatTab *tab = NULL;
+        for (int i = 0; i < chat_tab_count; i++) {
+            if (chat_tabs[i].vbox == vbox) {
+                tab = &chat_tabs[i];
+                break;
+            }
+        }
+        
+        if (tab) {
+            // Đánh dấu tab là ẩn
+            tab->is_visible = false;
+            
+            // TĂNG REFERENCE COUNT trước khi remove (để widget không bị destroy)
+            g_object_ref(tab->vbox);
+            
+            // Xóa khỏi notebook
+            gtk_notebook_remove_page(GTK_NOTEBOOK(chat_notebook), page_num);
+            
+            // Cập nhật page_num cho các tab còn lại
+            for (int i = 0; i < chat_tab_count; i++) {
+                if (chat_tabs[i].is_visible && chat_tabs[i].vbox) {
+                    int current_page = gtk_notebook_page_num(GTK_NOTEBOOK(chat_notebook), 
+                                                             chat_tabs[i].vbox);
+                    if (current_page >= 0) {
+                        chat_tabs[i].page_num = current_page;
+                    }
+                }
+            }
+            
+            printf("[DEBUG] Closed tab '%s', kept chat history (ref_count increased)\n", tab->name);
+        }
+    }
+}
+
+gboolean create_chat_tab_idle(gpointer data) {
+    char *name = (char *)data;
+    
+    // Kiểm tra tab đã tồn tại chưa
+    ChatTab *existing = find_chat_tab(name);
+    if (existing != NULL) {
+        if (existing->is_visible) {
+            // Tab đang hiển thị → chuyển đến tab đó
+            gtk_notebook_set_current_page(GTK_NOTEBOOK(chat_notebook), existing->page_num);
+            g_free(name);
+            return FALSE;
+        } else {
+            // Tab bị ẩn → MỞ LẠI
+            existing->is_visible = true;
+            
+            // Tab label với nút close MỚI
+            GtkWidget *tab_label_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+            GtkWidget *tab_label = gtk_label_new(name);
+            GtkWidget *close_button = gtk_button_new_from_icon_name("window-close", GTK_ICON_SIZE_BUTTON);
+            gtk_button_set_relief(GTK_BUTTON(close_button), GTK_RELIEF_NONE);
+            gtk_box_pack_start(GTK_BOX(tab_label_box), tab_label, FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX(tab_label_box), close_button, FALSE, FALSE, 0);
+            gtk_widget_show_all(tab_label_box);
+            
+            // Thêm lại vào notebook
+            int page_num = gtk_notebook_append_page(GTK_NOTEBOOK(chat_notebook), 
+                                                    existing->vbox, tab_label_box);
+            
+            // GIẢM REFERENCE COUNT sau khi add (notebook đã giữ reference)
+            g_object_unref(existing->vbox);
+            
+            gtk_widget_show_all(existing->vbox);
+            gtk_notebook_set_current_page(GTK_NOTEBOOK(chat_notebook), page_num);
+            
+            existing->page_num = page_num;
+            
+            // Callback đóng tab
+            g_signal_connect(close_button, "clicked", 
+                           G_CALLBACK(on_chat_tab_close), existing->vbox);
+            
+            printf("[DEBUG] Reopened tab for '%s' with chat history\n", name);
+            
+            g_free(name);
+            return FALSE;
+        }
+    }
+    
+    // Tạo tab mới hoàn toàn (giữ nguyên code cũ)
+    if (chat_tab_count >= MAX_CHAT_TABS) {
+        show_error_dialog("Maximum chat tabs reached!");
+        g_free(name);
+        return FALSE;
+    }
+    
+    ChatTab *tab = &chat_tabs[chat_tab_count];
+    strncpy(tab->name, name, MAX_USERNAME_LEN - 1);
+    tab->is_group = is_group_chat;
+    tab->is_visible = true;
+    
+    // Create tab content
+    tab->vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_container_set_border_width(GTK_CONTAINER(tab->vbox), 5);
+    
+    // Chat history
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    tab->textview = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(tab->textview), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(tab->textview), GTK_WRAP_WORD);
+    tab->buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(tab->textview));
+    
+    gtk_container_add(GTK_CONTAINER(scroll), tab->textview);
+    gtk_box_pack_start(GTK_BOX(tab->vbox), scroll, TRUE, TRUE, 0);
+    
+    // Tab label with close button
+    GtkWidget *tab_label_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    GtkWidget *tab_label = gtk_label_new(name);
+    GtkWidget *close_button = gtk_button_new_from_icon_name("window-close", GTK_ICON_SIZE_BUTTON);
+    gtk_button_set_relief(GTK_BUTTON(close_button), GTK_RELIEF_NONE);
+    gtk_box_pack_start(GTK_BOX(tab_label_box), tab_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(tab_label_box), close_button, FALSE, FALSE, 0);
+    gtk_widget_show_all(tab_label_box);
+    
+    // Add tab to notebook
+    int page_num = gtk_notebook_append_page(GTK_NOTEBOOK(chat_notebook), tab->vbox, tab_label_box);
+    gtk_widget_show_all(tab->vbox);
+    gtk_notebook_set_current_page(GTK_NOTEBOOK(chat_notebook), page_num);
+    
+    tab->page_num = page_num;
+    
+    // Close button callback
+    g_signal_connect(close_button, "clicked", 
+                   G_CALLBACK(on_chat_tab_close), tab->vbox);
+    
+    chat_tab_count++;
+    
+    printf("[DEBUG] Created new tab for '%s'\n", name);
+    
+    g_free(name);
+    return FALSE;
+}
+
+// Sửa hàm append_to_chat_tab - TỰ ĐỘNG MỞ TAB KHI NHẬN TIN NHẮN:
+void append_to_chat_tab(const char *name, const char *text) {
+    typedef struct {
+        char name[MAX_USERNAME_LEN];
+        char text[BUFFER_SIZE];
+    } ChatMessage;
+    
+    ChatTab *tab = find_chat_tab(name);
+    
+    if (tab == NULL) {
+        // CHƯA CÓ TAB → TẠO MỚI TỰ ĐỘNG
+        printf("[DEBUG] Auto-opening new chat tab for: %s\n", name);
+        open_chat_tab(name, false);
+        // Đợi tab được tạo
+        while (find_chat_tab(name) == NULL) {
+            usleep(10000); // 10ms
+        }
+        tab = find_chat_tab(name);
+    } else if (!tab->is_visible) {
+        // TAB BỊ ĐÓNG → MỞ LẠI TỰ ĐỘNG
+        printf("[DEBUG] Auto-reopening closed chat tab for: %s\n", name);
+        open_chat_tab(name, false);
+        // Đợi tab được mở lại
+        while (!tab->is_visible) {
+            usleep(10000); // 10ms
+        }
+    }
+    
+    // Append message
+    ChatMessage *msg = g_malloc(sizeof(ChatMessage));
+    strncpy(msg->name, name, MAX_USERNAME_LEN - 1);
+    strncpy(msg->text, text, BUFFER_SIZE - 1);
+    g_idle_add(append_to_chat_tab_idle, msg);
+}
+
+// ===========================
+// MESSAGE PROCESSING
+// ===========================
 
 void process_message(const char *raw_data) {
     Message msg;
@@ -377,12 +634,12 @@ void process_message(const char *raw_data) {
             
         case MSG_PRIVATE_MESSAGE:
             snprintf(buffer, sizeof(buffer), "[%s]: %s\n", msg.from, msg.content);
-            g_idle_add(append_chat_idle, g_strdup(buffer));
+            append_to_chat_tab(msg.from, buffer);
             break;
             
         case MSG_GROUP_MESSAGE:
-            snprintf(buffer, sizeof(buffer), "[%s @ %s]: %s\n", msg.from, msg.extra, msg.content);
-            g_idle_add(append_chat_idle, g_strdup(buffer));
+            snprintf(buffer, sizeof(buffer), "[%s]: %s\n", msg.from, msg.content);
+            append_to_chat_tab(msg.extra, buffer);  // msg.extra = group_name
             break;
             
         case MSG_ONLINE_USERS_LIST:
@@ -604,23 +861,42 @@ void on_btn_send_clicked(GtkWidget *widget, gpointer data) {
     (void)widget;
     (void)data;
     
-    if (strlen(target_name) == 0) {
-        show_error_dialog("Please select a user/group to chat with!");
+    // Get current active chat tab
+    int current_page = gtk_notebook_get_current_page(GTK_NOTEBOOK(chat_notebook));
+    if (current_page < 0) {
+        show_error_dialog("Please select a chat!");
+        return;
+    }
+    
+    // Lấy vbox của page hiện tại
+    GtkWidget *current_vbox = gtk_notebook_get_nth_page(GTK_NOTEBOOK(chat_notebook), current_page);
+    
+    // Tìm ChatTab tương ứng
+    ChatTab *tab = NULL;
+    for (int i = 0; i < chat_tab_count; i++) {
+        if (chat_tabs[i].vbox == current_vbox && chat_tabs[i].is_visible) {
+            tab = &chat_tabs[i];
+            break;
+        }
+    }
+    
+    if (!tab) {
+        show_error_dialog("Invalid chat tab!");
         return;
     }
     
     const char *message = gtk_entry_get_text(GTK_ENTRY(entry_message));
     if (strlen(message) == 0) return;
     
-    if (is_group_chat) {
-        send_request(MSG_GROUP_MESSAGE, message, target_name);
+    if (tab->is_group) {
+        send_request(MSG_GROUP_MESSAGE, message, tab->name);
     } else {
-        send_request(MSG_PRIVATE_MESSAGE, message, target_name);
+        send_request(MSG_PRIVATE_MESSAGE, message, tab->name);
     }
     
     char display[BUFFER_SIZE];
-    snprintf(display, sizeof(display), "Me -> %s: %s\n", target_name, message);
-    g_idle_add(append_chat_idle, g_strdup(display));
+    snprintf(display, sizeof(display), "Me: %s\n", message);
+    append_to_chat_tab(tab->name, display);
     
     gtk_entry_set_text(GTK_ENTRY(entry_message), "");
 }
@@ -636,12 +912,7 @@ void on_user_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
     GtkWidget *label = gtk_bin_get_child(GTK_BIN(row));
     const char *username = gtk_label_get_text(GTK_LABEL(label));
     
-    strncpy(target_name, username, MAX_USERNAME_LEN - 1);
-    is_group_chat = false;
-    
-    char buffer[256];
-    snprintf(buffer, sizeof(buffer), "Chatting with: %s", target_name);
-    gtk_label_set_text(GTK_LABEL(label_chatting_with), buffer);
+    open_chat_tab(username, false);
 }
 
 void on_friend_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
@@ -651,7 +922,6 @@ void on_friend_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data)
     GtkWidget *label = gtk_bin_get_child(GTK_BIN(row));
     const char *username = gtk_label_get_text(GTK_LABEL(label));
     
-    // Show dialog with options
     GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
                                                GTK_DIALOG_DESTROY_WITH_PARENT,
                                                GTK_MESSAGE_QUESTION,
@@ -665,18 +935,11 @@ void on_friend_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data)
     gtk_widget_destroy(dialog);
     
     if (response == 1) {
-        // Chat
-        strncpy(target_name, username, MAX_USERNAME_LEN - 1);
-        is_group_chat = false;
-        
-        char buffer[256];
-        snprintf(buffer, sizeof(buffer), "Chatting with friend: %s", target_name);
-        gtk_label_set_text(GTK_LABEL(label_chatting_with), buffer);
+        open_chat_tab(username, false);
     } else if (response == 2) {
-        // Remove friend
         send_request(MSG_FRIEND_REMOVE, "", username);
         show_info_dialog("Friend removed!");
-        send_request(MSG_GET_FRIENDS, "", "");  // Refresh friend list
+        send_request(MSG_GET_FRIENDS, "", "");
     }
 }
 
@@ -687,7 +950,6 @@ void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) 
     GtkWidget *label = gtk_bin_get_child(GTK_BIN(row));
     const char *group_name = gtk_label_get_text(GTK_LABEL(label));
     
-    // Show dialog to join group, invite members, or send group message
     GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
                                                GTK_DIALOG_DESTROY_WITH_PARENT,
                                                GTK_MESSAGE_QUESTION,
@@ -702,7 +964,6 @@ void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) 
     gtk_widget_destroy(dialog);
     
     if (response == 1) {
-        // Join group
         Message msg;
         create_response_message(&msg, MSG_GROUP_JOIN, current_username, "", "");
         strncpy(msg.extra, group_name, sizeof(msg.extra) - 1);
@@ -714,14 +975,8 @@ void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) 
         }
         show_info_dialog("Join request sent!");
     } else if (response == 2) {
-        // Set as chat target
-        strncpy(target_name, group_name, MAX_USERNAME_LEN - 1);
-        is_group_chat = true;
-        char buffer[256];
-        snprintf(buffer, sizeof(buffer), "Group chat: %s", target_name);
-        gtk_label_set_text(GTK_LABEL(label_chatting_with), buffer);
+        open_chat_tab(group_name, true);
     } else if (response == 3) {
-        // Leave group
         Message msg;
         create_response_message(&msg, MSG_GROUP_LEAVE, current_username, "", "");
         strncpy(msg.extra, group_name, sizeof(msg.extra) - 1);
@@ -1067,25 +1322,15 @@ void create_chat_screen() {
     gtk_box_pack_start(GTK_BOX(left_panel), notebook_tabs, TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(chat_box), left_panel, FALSE, FALSE, 0);
     
-    // Right panel - chat area
+    // Right panel - chat area with notebook for multiple chats
     GtkWidget *right_panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_container_set_border_width(GTK_CONTAINER(right_panel), 5);
     
-    // Chatting with label
-    label_chatting_with = gtk_label_new("Select a user to chat...");
-    gtk_widget_set_halign(label_chatting_with, GTK_ALIGN_START);
-    gtk_box_pack_start(GTK_BOX(right_panel), label_chatting_with, FALSE, FALSE, 0);
-    
-    // Chat history
-    GtkWidget *scroll_chat = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_chat),
-                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    textview_chat = gtk_text_view_new();
-    gtk_text_view_set_editable(GTK_TEXT_VIEW(textview_chat), FALSE);
-    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(textview_chat), GTK_WRAP_WORD);
-    chat_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(textview_chat));
-    gtk_container_add(GTK_CONTAINER(scroll_chat), textview_chat);
-    gtk_box_pack_start(GTK_BOX(right_panel), scroll_chat, TRUE, TRUE, 0);
+    // Chat notebook for multiple conversations
+    chat_notebook = gtk_notebook_new();
+    gtk_notebook_set_tab_pos(GTK_NOTEBOOK(chat_notebook), GTK_POS_TOP);
+    gtk_notebook_set_scrollable(GTK_NOTEBOOK(chat_notebook), TRUE);
+    gtk_box_pack_start(GTK_BOX(right_panel), chat_notebook, TRUE, TRUE, 0);
     
     // Message input
     GtkWidget *input_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);

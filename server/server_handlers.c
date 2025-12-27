@@ -897,6 +897,19 @@ void handle_friend_request(Message *msg) {
     
     printf("[FRIEND_REQUEST] %s wants to add %s as friend\n", from_user, to_user);
     
+    // Kiểm tra không thể add chính mình
+    if (strcmp(from_user, to_user) == 0) {
+        Message error_msg;
+        create_response_message(&error_msg, MSG_RESPONSE_ERROR, "SERVER", from_user, 
+                               "Cannot add yourself as a friend");
+        int from_socket = find_client_socket(from_user);
+        if (from_socket >= 0) {
+            send_message_struct(from_socket, &error_msg);
+        }
+        printf("[FRIEND_REQUEST] Failed: %s tried to add themselves\n", from_user);
+        return;
+    }
+    
     // Kiểm tra user tồn tại
     mutex_lock(&server_state.users_mutex);
     int to_exists = 0;
