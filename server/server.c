@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <signal.h>
@@ -77,6 +78,29 @@ int accept_client(int server_socket, ClientConnection *client) {
     if (client_socket < 0) {
         perror("Accept failed");
         return -1;
+    }
+    
+    // Enable SO_KEEPALIVE để phát hiện kết nối bị mất
+    int keepalive = 1;
+    if (setsockopt(client_socket, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive)) < 0) {
+        perror("Warning: Failed to set SO_KEEPALIVE");
+    }
+    
+    // Set TCP keepalive parameters (Linux specific)
+    int keepidle = 60;      // Start keepalive after 60s idle
+    int keepintvl = 10;     // Send keepalive every 10s
+    int keepcnt = 3;        // Drop after 3 failed keepalives
+    
+    setsockopt(client_socket, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
+    setsockopt(client_socket, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(keepintvl));
+    setsockopt(client_socket, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(keepcnt));
+    
+    // Set receive timeout để phát hiện timeout
+    struct timeval timeout;
+    timeout.tv_sec = 300;   // 5 minutes timeout
+    timeout.tv_usec = 0;
+    if (setsockopt(client_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        perror("Warning: Failed to set SO_RCVTIMEO");
     }
     
     // Initialize client connection
@@ -482,16 +506,40 @@ int handle_login(ClientConnection *client, const Message *msg) {
         return -1;
     }
     
-    // Kiểm tra user đã online chưa (không cho login 2 lần)
+    // Kiểm tra user đã online chưa
     if (server_state.users[user_found].is_online) {
-        mutex_unlock(&server_state.users_mutex);
+        // Force logout session cũ trước khi cho login mới
+        int old_socket = server_state.users[user_found].socket_fd;
+        printf("[LOGIN] User '%s' already online (socket: %d), forcing logout of old session\n", 
+               username, old_socket);
         
-        create_response_message(&response, MSG_ERROR, "SERVER", username, 
-                               "User already logged in");
-        send_message_struct(client->socket_fd, &response);
+        // Tìm và cleanup client connection cũ
+        mutex_lock(&server_state.clients_mutex);
+        for (int i = 0; i < server_state.client_count; i++) {
+            if (server_state.clients[i].socket_fd == old_socket && 
+                strcmp(server_state.clients[i].username, username) == 0) {
+                
+                // Gửi thông báo bị kick ra
+                Message kick_msg;
+                create_response_message(&kick_msg, MSG_ERROR, "SERVER", username, 
+                                       "You have been logged out (new login detected)");
+                send_message_struct(old_socket, &kick_msg);
+                
+                // Close socket cũ
+                close(old_socket);
+                server_state.clients[i].socket_fd = -1;
+                server_state.clients[i].is_authenticated = false;
+                memset(server_state.clients[i].username, 0, MAX_USERNAME_LEN);
+                
+                printf("[LOGIN] Closed old session for '%s'\n", username);
+                break;
+            }
+        }
+        mutex_unlock(&server_state.clients_mutex);
         
-        printf("[LOGIN] Failed: User '%s' already online\n", username);
-        return -1;
+        // Force offline status
+        server_state.users[user_found].is_online = 0;
+        server_state.users[user_found].socket_fd = -1;
     }
     
     mutex_unlock(&server_state.users_mutex);
