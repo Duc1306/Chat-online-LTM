@@ -175,13 +175,10 @@ gboolean switch_view_idle(gpointer data) {
 
 gboolean append_chat_idle(gpointer data) {
     char *text = (char *)data;
-    GtkTextIter iter;
-    gtk_text_buffer_get_end_iter(chat_buffer, &iter);
-    gtk_text_buffer_insert(chat_buffer, &iter, text, -1);
     
-    // Auto scroll to bottom
-    GtkTextMark *mark = gtk_text_buffer_get_insert(chat_buffer);
-    gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(textview_chat), mark, 0.0, TRUE, 0.0, 1.0);
+    // Main chat area không tồn tại trong phiên bản này
+    // Các thông báo chung được bỏ qua
+    printf("[INFO] %s", text);
     
     g_free(text);
     return FALSE;
@@ -393,9 +390,17 @@ ChatTab* find_chat_tab(const char *name) {
 }
 
 void open_chat_tab(const char *name, bool is_group) {
-    is_group_chat = is_group;
-    strncpy(target_name, name, MAX_USERNAME_LEN - 1);
-    g_idle_add(create_chat_tab_idle, g_strdup(name));
+    typedef struct {
+        char name[MAX_USERNAME_LEN];
+        bool is_group;
+    } ChatTabRequest;
+    
+    ChatTabRequest *req = g_malloc(sizeof(ChatTabRequest));
+    strncpy(req->name, name, MAX_USERNAME_LEN - 1);
+    req->name[MAX_USERNAME_LEN - 1] = '\0';
+    req->is_group = is_group;
+    
+    g_idle_add(create_chat_tab_idle, req);
 }
 
 gboolean append_to_chat_tab_idle(gpointer data) {
@@ -405,9 +410,26 @@ gboolean append_to_chat_tab_idle(gpointer data) {
     } ChatMessage;
     
     ChatMessage *msg = (ChatMessage *)data;
+    
+    // Validate name không rỗng
+    if (msg->name[0] == '\0') {
+        printf("[ERROR] append_to_chat_tab_idle: name is empty\n");
+        g_free(data);
+        return FALSE;
+    }
+    
     ChatTab *tab = find_chat_tab(msg->name);
     
+    // Debug: log trạng thái tab
     if (tab != NULL) {
+        printf("[DEBUG] append_to_chat_tab_idle for '%s': visible=%d, buffer=%p, textview=%p\n",
+               msg->name, tab->is_visible, (void*)tab->buffer, (void*)tab->textview);
+    }
+    
+    // Kiểm tra tab hợp lệ, đang visible, và có buffer & textview hợp lệ
+    if (tab != NULL && tab->is_visible && 
+        tab->buffer != NULL && GTK_IS_TEXT_BUFFER(tab->buffer) &&
+        tab->textview != NULL && GTK_IS_TEXT_VIEW(tab->textview)) {
         GtkTextIter iter;
         gtk_text_buffer_get_end_iter(tab->buffer, &iter);
         gtk_text_buffer_insert(tab->buffer, &iter, msg->text, -1);
@@ -415,6 +437,19 @@ gboolean append_to_chat_tab_idle(gpointer data) {
         // Auto scroll
         GtkTextMark *mark = gtk_text_buffer_get_insert(tab->buffer);
         gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(tab->textview), mark, 0.0, TRUE, 0.0, 1.0);
+    } else {
+        if (tab == NULL) {
+            printf("[ERROR] Tab not found for '%s'\n", msg->name);
+        } else if (!tab->is_visible) {
+            printf("[ERROR] Tab '%s' is not visible (buffer=%p, textview=%p)\n", 
+                   msg->name, (void*)tab->buffer, (void*)tab->textview);
+        } else if (tab->buffer == NULL || !GTK_IS_TEXT_BUFFER(tab->buffer)) {
+            printf("[ERROR] Invalid buffer for '%s' (buffer=%p, is_visible=%d)\n", 
+                   msg->name, (void*)tab->buffer, tab->is_visible);
+        } else if (tab->textview == NULL || !GTK_IS_TEXT_VIEW(tab->textview)) {
+            printf("[ERROR] Invalid textview for '%s' (textview=%p, is_visible=%d)\n", 
+                   msg->name, (void*)tab->textview, tab->is_visible);
+        }
     }
     
     g_free(data);
@@ -463,19 +498,28 @@ void on_chat_tab_close(GtkWidget *widget, gpointer data) {
 }
 
 gboolean create_chat_tab_idle(gpointer data) {
-    char *name = (char *)data;
+    typedef struct {
+        char name[MAX_USERNAME_LEN];
+        bool is_group;
+    } ChatTabRequest;
+    
+    ChatTabRequest *req = (ChatTabRequest *)data;
+    const char *name = req->name;
+    bool is_group = req->is_group;
     
     // Kiểm tra tab đã tồn tại chưa
     ChatTab *existing = find_chat_tab(name);
     if (existing != NULL) {
         if (existing->is_visible) {
-            // Tab đang hiển thị → chuyển đến tab đó
+            // Tab đang hiển thị → chuyển đến tab đó và update is_group
+            existing->is_group = is_group;
             gtk_notebook_set_current_page(GTK_NOTEBOOK(chat_notebook), existing->page_num);
-            g_free(name);
+            g_free(data);
             return FALSE;
         } else {
             // Tab bị ẩn → MỞ LẠI
             existing->is_visible = true;
+            existing->is_group = is_group;  // Update is_group flag
             
             // Tab label với nút close MỚI
             GtkWidget *tab_label_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
@@ -504,21 +548,21 @@ gboolean create_chat_tab_idle(gpointer data) {
             
             printf("[DEBUG] Reopened tab for '%s' with chat history\n", name);
             
-            g_free(name);
+            g_free(data);
             return FALSE;
         }
     }
     
-    // Tạo tab mới hoàn toàn (giữ nguyên code cũ)
+    // Tạo tab mới hoàn toàn
     if (chat_tab_count >= MAX_CHAT_TABS) {
         show_error_dialog("Maximum chat tabs reached!");
-        g_free(name);
+        g_free(data);
         return FALSE;
     }
     
     ChatTab *tab = &chat_tabs[chat_tab_count];
     strncpy(tab->name, name, MAX_USERNAME_LEN - 1);
-    tab->is_group = is_group_chat;
+    tab->is_group = is_group;
     tab->is_visible = true;
     
     // Create tab content
@@ -559,9 +603,9 @@ gboolean create_chat_tab_idle(gpointer data) {
     
     chat_tab_count++;
     
-    printf("[DEBUG] Created new tab for '%s'\n", name);
+    printf("[DEBUG] Created new tab for '%s' (is_group=%d)\n", name, is_group);
     
-    g_free(name);
+    g_free(data);
     return FALSE;
 }
 
@@ -572,25 +616,60 @@ void append_to_chat_tab(const char *name, const char *text) {
         char text[BUFFER_SIZE];
     } ChatMessage;
     
+    // Validate name không rỗng
+    if (name == NULL || name[0] == '\0') {
+        printf("[ERROR] Cannot append to chat tab: name is empty\n");
+        return;
+    }
+    
     ChatTab *tab = find_chat_tab(name);
     
     if (tab == NULL) {
         // CHƯA CÓ TAB → TẠO MỚI TỰ ĐỘNG
         printf("[DEBUG] Auto-opening new chat tab for: %s\n", name);
         open_chat_tab(name, false);
-        // Đợi tab được tạo
-        while (find_chat_tab(name) == NULL) {
+        // Đợi tab được tạo VÀ widgets sẵn sàng
+        int max_wait = 100; // max 1 second
+        while (find_chat_tab(name) == NULL && max_wait > 0) {
             usleep(10000); // 10ms
+            max_wait--;
         }
         tab = find_chat_tab(name);
+        if (tab == NULL || max_wait == 0) {
+            printf("[ERROR] Failed to create tab for '%s'\n", name);
+            return;
+        }
+        // Đợi widgets sẵn sàng
+        max_wait = 100;
+        while ((tab->buffer == NULL || tab->textview == NULL) && max_wait > 0) {
+            usleep(10000); // 10ms
+            max_wait--;
+        }
+        if (max_wait == 0) {
+            printf("[ERROR] Timeout waiting for widgets in new tab '%s'\n", name);
+            return;
+        }
     } else if (!tab->is_visible) {
         // TAB BỊ ĐÓNG → MỞ LẠI TỰ ĐỘNG
         printf("[DEBUG] Auto-reopening closed chat tab for: %s\n", name);
         open_chat_tab(name, false);
-        // Đợi tab được mở lại
-        while (!tab->is_visible) {
+        // Đợi tab được mở lại VÀ widgets sẵn sàng
+        int max_wait = 100; // max 1 second
+        while ((!tab->is_visible || tab->buffer == NULL || tab->textview == NULL) && max_wait > 0) {
             usleep(10000); // 10ms
+            max_wait--;
         }
+        if (max_wait == 0) {
+            printf("[ERROR] Timeout waiting for tab '%s' to reopen\n", name);
+            return;
+        }
+    }
+    
+    // Đảm bảo buffer và textview hợp lệ trước khi append
+    if (tab->buffer == NULL || !GTK_IS_TEXT_BUFFER(tab->buffer) ||
+        tab->textview == NULL || !GTK_IS_TEXT_VIEW(tab->textview)) {
+        printf("[ERROR] Tab '%s' widgets not ready\n", name);
+        return;
     }
     
     // Append message

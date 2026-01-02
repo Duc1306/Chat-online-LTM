@@ -69,24 +69,30 @@ int find_user_socket(const char *username) {
     
     mutex_lock(&server_state.users_mutex);
     
-    printf("[DEBUG] find_user_socket: Looking for '%s' in %d users\n", 
-           username, server_state.user_count);
+    printf("[DEBUG] find_user_socket: Looking for '%s' (len=%zu) in %d users\n", 
+           username, strlen(username), server_state.user_count);
     
     for (int i = 0; i < server_state.user_count; i++) {
-        printf("[DEBUG]   User[%d]: '%s', online=%d, socket=%d\n", 
-               i, server_state.users[i].username, 
+        printf("[DEBUG]   User[%d]: username='%s' (len=%zu), online=%d, socket=%d\n", 
+               i, server_state.users[i].username, strlen(server_state.users[i].username),
                server_state.users[i].is_online, 
                server_state.users[i].socket_fd);
+        
+        int cmp = strcmp(server_state.users[i].username, username);
+        if (cmp == 0) {
+            printf("[DEBUG]   -> MATCH found! online=%d\n", server_state.users[i].is_online);
+        }
                
-        if (strcmp(server_state.users[i].username, username) == 0 &&
-            server_state.users[i].is_online) {
+        if (cmp == 0 && server_state.users[i].is_online) {
             int sock = server_state.users[i].socket_fd;
             mutex_unlock(&server_state.users_mutex);
+            printf("[DEBUG] Returning socket %d for '%s'\n", sock, username);
             return sock;
         }
     }
     
     mutex_unlock(&server_state.users_mutex);
+    printf("[DEBUG] User '%s' not found or not online\n", username);
     return -1;
 }
 
@@ -714,6 +720,11 @@ int relay_group_message(const Message *msg) {
     }
     
     // Forward đến tất cả members (trừ sender)
+    Message fwd_msg = *msg;
+    fwd_msg.type = MSG_GROUP_MESSAGE;
+    strncpy(fwd_msg.extra, group_name, sizeof(fwd_msg.extra) - 1);
+    fwd_msg.extra[sizeof(fwd_msg.extra) - 1] = '\0';
+    
     for (int i = 0; i < group->member_count; i++) {
         if (strcmp(group->members[i], msg->from) == 0) {
             continue;  // Skip sender
@@ -721,10 +732,10 @@ int relay_group_message(const Message *msg) {
         
         int member_socket = find_user_socket(group->members[i]);
         if (member_socket != -1) {
-            send_message_struct(member_socket, msg);
+            send_message_struct(member_socket, &fwd_msg);
         } else {
             // Member offline, save message
-            save_offline_message(msg);
+            save_offline_message(&fwd_msg);
         }
     }
     
