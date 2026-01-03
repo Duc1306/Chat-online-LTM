@@ -31,6 +31,10 @@ typedef int socket_t;
 #define PORT 8888
 #define BUFFER_SIZE 4096
 
+// THÊM: File transfer constants
+#define MAX_FILE_SIZE (10 * 1024 * 1024)  // 10MB max file size
+#define FILE_CHUNK_SIZE 8192               // 8KB chunks for transfer
+
 // ===========================
 // MESSAGE TYPES - Các loại message
 // ===========================
@@ -195,5 +199,11 @@ void create_response_message(Message *msg, MessageType type, const char *from,
  * Cross-platform sleep function
  */
 void sleep_ms(int milliseconds);
+
+/**
+ * Base64 encoding/decoding for file transfer
+ */
+int base64_encode(const unsigned char *input, size_t input_len, char *output, size_t output_size);
+int base64_decode(const char *input, size_t input_len, unsigned char *output, size_t output_size);
 
 #endif // PROTOCOL_H

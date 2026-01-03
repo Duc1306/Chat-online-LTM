@@ -217,3 +217,129 @@ void create_response_message(Message *msg, MessageType type, const char *from,
     
     get_current_timestamp(msg->timestamp, sizeof(msg->timestamp));
 }
+
+/**
+ * Base64 encoding table
+ */
+static const char base64_chars[] = 
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * Encode binary data to Base64 string
+ * Returns: length of encoded string, or -1 on error
+ */
+int base64_encode(const unsigned char *input, size_t input_len, char *output, size_t output_size) {
+    if (input == NULL || output == NULL || output_size == 0) return -1;
+    
+    size_t encoded_len = 4 * ((input_len + 2) / 3);
+    if (encoded_len >= output_size) return -1;  // Output buffer too small
+    
+    size_t i = 0, j = 0;
+    unsigned char char_array_3[3];
+    unsigned char char_array_4[4];
+    
+    while (input_len--) {
+        char_array_3[i++] = *(input++);
+        if (i == 3) {
+            char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+            char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+            char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+            char_array_4[3] = char_array_3[2] & 0x3f;
+            
+            for (i = 0; i < 4; i++) {
+                output[j++] = base64_chars[char_array_4[i]];
+            }
+            i = 0;
+        }
+    }
+    
+    if (i) {
+        for (size_t k = i; k < 3; k++) {
+            char_array_3[k] = '\0';
+        }
+        
+        char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+        char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+        char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+        
+        for (size_t k = 0; k < i + 1; k++) {
+            output[j++] = base64_chars[char_array_4[k]];
+        }
+        
+        while (i++ < 3) {
+            output[j++] = '=';
+        }
+    }
+    
+    output[j] = '\0';
+    return (int)j;
+}
+
+/**
+ * Decode Base64 string to binary data
+ * Returns: length of decoded data, or -1 on error
+ */
+int base64_decode(const char *input, size_t input_len, unsigned char *output, size_t output_size) {
+    if (input == NULL || output == NULL || output_size == 0) return -1;
+    
+    // Create reverse lookup table
+    static int decode_table[256];
+    static int table_initialized = 0;
+    
+    if (!table_initialized) {
+        memset(decode_table, -1, sizeof(decode_table));
+        for (int i = 0; i < 64; i++) {
+            decode_table[(unsigned char)base64_chars[i]] = i;
+        }
+        table_initialized = 1;
+    }
+    
+    size_t i = 0, j = 0;
+    unsigned char char_array_4[4], char_array_3[3];
+    int k = 0;
+    
+    while (input_len-- && input[i] != '=') {
+        if (decode_table[(unsigned char)input[i]] == -1) {
+            i++;
+            continue;
+        }
+        
+        char_array_4[k++] = input[i++];
+        
+        if (k == 4) {
+            for (k = 0; k < 4; k++) {
+                char_array_4[k] = decode_table[(unsigned char)char_array_4[k]];
+            }
+            
+            char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+            char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+            char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+            
+            for (k = 0; k < 3; k++) {
+                if (j >= output_size) return -1;  // Output buffer too small
+                output[j++] = char_array_3[k];
+            }
+            k = 0;
+        }
+    }
+    
+    if (k) {
+        for (int n = k; n < 4; n++) {
+            char_array_4[n] = 0;
+        }
+        
+        for (int n = 0; n < k; n++) {
+            char_array_4[n] = decode_table[(unsigned char)char_array_4[n]];
+        }
+        
+        char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+        char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+        
+        for (int n = 0; n < k - 1; n++) {
+            if (j >= output_size) return -1;
+            output[j++] = char_array_3[n];
+        }
+    }
+    
+    return (int)j;
+}
