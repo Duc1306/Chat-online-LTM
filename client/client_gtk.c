@@ -42,6 +42,8 @@ void append_to_chat_tab(const char *name, const char *text);
 void open_chat_tab(const char *name, bool is_group);
 ChatTab* find_chat_tab(const char *name);  // Bây giờ ChatTab đã được định nghĩa
 void on_chat_tab_close(GtkWidget *widget, gpointer data);
+void on_btn_send_file_clicked(GtkWidget *widget, gpointer data);
+void show_file_receive_dialog(const char *from, const char *filename, uint32_t file_size, char *file_data);
 
 // ===========================
 // GLOBAL STATE
@@ -680,6 +682,112 @@ void append_to_chat_tab(const char *name, const char *text) {
 }
 
 // ===========================
+// FILE TRANSFER FUNCTIONS
+// ===========================
+
+typedef struct {
+    char from[MAX_USERNAME_LEN];
+    char filename[MAX_FILENAME_LEN];
+    uint32_t file_size;
+    char *file_data;  // Already received file data
+} FileReceiveData;
+
+gboolean show_file_receive_dialog_idle(gpointer data) {
+    FileReceiveData *file_data = (FileReceiveData *)data;
+    
+    char message[BUFFER_SIZE];
+    snprintf(message, sizeof(message), 
+             "%s wants to send you a file:\n\nFilename: %s\nSize: %.2f KB\n\nDo you want to accept?",
+             file_data->from, file_data->filename, file_data->file_size / 1024.0);
+    
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
+                                               GTK_DIALOG_MODAL,
+                                               GTK_MESSAGE_QUESTION,
+                                               GTK_BUTTONS_YES_NO,
+                                               "%s", message);
+    
+    int response = gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+    
+    if (response == GTK_RESPONSE_YES) {
+        // Accept file
+        send_request(MSG_FILE_ACCEPT, "", file_data->from);
+        
+        // Open file chooser to select save location
+        GtkWidget *file_chooser = gtk_file_chooser_dialog_new(
+            "Save File",
+            GTK_WINDOW(window),
+            GTK_FILE_CHOOSER_ACTION_SAVE,
+            "Cancel", GTK_RESPONSE_CANCEL,
+            "Save", GTK_RESPONSE_ACCEPT,
+            NULL);
+        
+        gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(file_chooser), file_data->filename);
+        gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(file_chooser), TRUE);
+        
+        if (gtk_dialog_run(GTK_DIALOG(file_chooser)) == GTK_RESPONSE_ACCEPT) {
+            char *save_path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(file_chooser));
+            
+            // Save file (data already received)
+            if (file_data->file_data != NULL) {
+                FILE *fp = fopen(save_path, "wb");
+                if (fp != NULL) {
+                    fwrite(file_data->file_data, 1, file_data->file_size, fp);
+                    fclose(fp);
+                    
+                    char success_msg[BUFFER_SIZE];
+                    snprintf(success_msg, sizeof(success_msg), 
+                             "File saved successfully to:\n%s", save_path);
+                    show_info_dialog(success_msg);
+                    
+                    // Log to chat
+                    char log_msg[BUFFER_SIZE];
+                    snprintf(log_msg, sizeof(log_msg), 
+                             "[FILE] Received '%s' from %s (%.2f KB)\n",
+                             file_data->filename, file_data->from, file_data->file_size / 1024.0);
+                    append_to_chat_tab(file_data->from, log_msg);
+                } else {
+                    show_error_dialog("Failed to save file");
+                }
+            } else {
+                show_error_dialog("File data not available");
+            }
+            
+            g_free(save_path);
+        }
+        
+        gtk_widget_destroy(file_chooser);
+    } else {
+        // Reject file
+        send_request(MSG_FILE_REJECT, "", file_data->from);
+        
+        char reject_msg[BUFFER_SIZE];
+        snprintf(reject_msg, sizeof(reject_msg), 
+                 "[FILE] Rejected file '%s' from %s\n",
+                 file_data->filename, file_data->from);
+        append_to_chat_tab(file_data->from, reject_msg);
+    }
+    
+    // Free file data buffer
+    if (file_data->file_data != NULL) {
+        free(file_data->file_data);
+    }
+    g_free(file_data);
+    return FALSE;
+}
+
+void show_file_receive_dialog(const char *from, const char *filename, uint32_t file_size, char *file_data) {
+    FileReceiveData *data = g_malloc(sizeof(FileReceiveData));
+    strncpy(data->from, from, MAX_USERNAME_LEN - 1);
+    data->from[MAX_USERNAME_LEN - 1] = '\0';
+    strncpy(data->filename, filename, MAX_FILENAME_LEN - 1);
+    data->filename[MAX_FILENAME_LEN - 1] = '\0';
+    data->file_size = file_size;
+    data->file_data = file_data;  // Transfer ownership
+    g_idle_add(show_file_receive_dialog_idle, data);
+}
+
+// ===========================
 // MESSAGE PROCESSING
 // ===========================
 
@@ -808,6 +916,52 @@ void process_message(const char *raw_data) {
         case MSG_OFFLINE_SYNC:
             snprintf(buffer, sizeof(buffer), "[OFFLINE MSG from %s]: %s\n", msg.from, msg.content);
             g_idle_add(append_chat_idle, g_strdup(buffer));
+            break;
+            
+        case MSG_FILE_SEND:
+            // Incoming file transfer request
+            {
+                const char *filename = msg.extra;
+                uint32_t file_size = (uint32_t)atoi(msg.content);
+                
+                printf("[FILE] Receiving file '%s' (%u bytes) from '%s'\n", 
+                       filename, file_size, msg.from);
+                
+                // Receive file data immediately (in background thread)
+                char *file_buffer = malloc(file_size);
+                if (file_buffer != NULL) {
+                    uint32_t total_received = 0;
+                    while (total_received < file_size) {
+                        int bytes = recv(client_socket, file_buffer + total_received,
+                                       file_size - total_received, 0);
+                        if (bytes <= 0) {
+                            printf("[FILE] Failed to receive file data\n");
+                            free(file_buffer);
+                            file_buffer = NULL;
+                            break;
+                        }
+                        total_received += bytes;
+                    }
+                    
+                    if (file_buffer != NULL) {
+                        printf("[FILE] Received %u bytes, showing dialog\n", total_received);
+                        // Show dialog with already-received file data
+                        show_file_receive_dialog(msg.from, filename, file_size, file_buffer);
+                    }
+                } else {
+                    printf("[FILE] Failed to allocate memory for file\n");
+                }
+            }
+            break;
+            
+        case MSG_FILE_ACCEPT:
+            snprintf(buffer, sizeof(buffer), "[FILE] %s accepted your file\n", msg.from);
+            append_to_chat_tab(msg.from, buffer);
+            break;
+            
+        case MSG_FILE_REJECT:
+            snprintf(buffer, sizeof(buffer), "[FILE] %s rejected your file\n", msg.from);
+            append_to_chat_tab(msg.from, buffer);
             break;
             
         default:
@@ -1215,6 +1369,143 @@ void on_btn_join_group_clicked(GtkWidget *widget, gpointer data) {
     gtk_entry_set_text(GTK_ENTRY(entry_join_group_name), "");
 }
 
+void on_btn_send_file_clicked(GtkWidget *widget, gpointer data) {
+    (void)widget;
+    (void)data;  // We'll get recipient from current tab
+    
+    // Get current active tab to determine recipient
+    int current_page = gtk_notebook_get_current_page(GTK_NOTEBOOK(chat_notebook));
+    if (current_page < 0) {
+        show_error_dialog("Please select a chat first");
+        return;
+    }
+    
+    // Find the recipient from the tab
+    const char *recipient = NULL;
+    for (int i = 0; i < chat_tab_count; i++) {
+        if (chat_tabs[i].page_num == current_page && chat_tabs[i].is_visible) {
+            recipient = chat_tabs[i].name;
+            break;
+        }
+    }
+    
+    if (recipient == NULL || strlen(recipient) == 0) {
+        show_error_dialog("No recipient selected");
+        return;
+    }
+    
+    // Open file chooser
+    GtkWidget *file_chooser = gtk_file_chooser_dialog_new(
+        "Select File to Send",
+        GTK_WINDOW(window),
+        GTK_FILE_CHOOSER_ACTION_OPEN,
+        "Cancel", GTK_RESPONSE_CANCEL,
+        "Send", GTK_RESPONSE_ACCEPT,
+        NULL);
+    
+    // Add file size filter (10MB max)
+    GtkFileFilter *filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(filter, "Files up to 10MB");
+    gtk_file_filter_add_pattern(filter, "*");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(file_chooser), filter);
+    
+    if (gtk_dialog_run(GTK_DIALOG(file_chooser)) == GTK_RESPONSE_ACCEPT) {
+        char *filepath = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(file_chooser));
+        
+        // Get file info
+        FILE *fp = fopen(filepath, "rb");
+        if (fp == NULL) {
+            show_error_dialog("Failed to open file");
+            g_free(filepath);
+            gtk_widget_destroy(file_chooser);
+            return;
+        }
+        
+        fseek(fp, 0, SEEK_END);
+        long file_size = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        
+        // Check file size (10MB max)
+        if (file_size > 10 * 1024 * 1024) {
+            show_error_dialog("File too large (max 10MB)");
+            fclose(fp);
+            g_free(filepath);
+            gtk_widget_destroy(file_chooser);
+            return;
+        }
+        
+        // Read file data
+        char *file_data = malloc(file_size);
+        if (file_data == NULL) {
+            show_error_dialog("Memory allocation failed");
+            fclose(fp);
+            g_free(filepath);
+            gtk_widget_destroy(file_chooser);
+            return;
+        }
+        
+        size_t read_size = fread(file_data, 1, file_size, fp);
+        fclose(fp);
+        
+        if (read_size != (size_t)file_size) {
+            show_error_dialog("Failed to read file");
+            free(file_data);
+            g_free(filepath);
+            gtk_widget_destroy(file_chooser);
+            return;
+        }
+        
+        // Extract filename
+        const char *filename = strrchr(filepath, '/');
+        if (filename == NULL) {
+            filename = filepath;
+        } else {
+            filename++;  // Skip '/'
+        }
+        
+        // Send file transfer message
+        Message msg;
+        create_response_message(&msg, MSG_FILE_SEND, current_username, recipient, "");
+        snprintf(msg.content, sizeof(msg.content), "%ld", file_size);
+        strncpy(msg.extra, filename, MAX_MESSAGE_LEN - 1);
+        msg.extra[MAX_MESSAGE_LEN - 1] = '\0';
+        
+        char buffer[BUFFER_SIZE];
+        int len = serialize_message(&msg, buffer, sizeof(buffer));
+        if (len > 0) {
+            // Send message header
+            if (send_packet(buffer, len) > 0) {
+                // Send file data
+                int total_sent = 0;
+                while (total_sent < file_size) {
+                    int bytes = send(client_socket, file_data + total_sent,
+                                   file_size - total_sent, 0);
+                    if (bytes <= 0) {
+                        show_error_dialog("Failed to send file data");
+                        break;
+                    }
+                    total_sent += bytes;
+                }
+                
+                if (total_sent == file_size) {
+                    char success_msg[BUFFER_SIZE];
+                    snprintf(success_msg, sizeof(success_msg),
+                             "[FILE] Sent '%s' to %s (%.2f KB)\n",
+                             filename, recipient, file_size / 1024.0);
+                    append_to_chat_tab(recipient, success_msg);
+                }
+            } else {
+                show_error_dialog("Failed to send file message");
+            }
+        }
+        
+        free(file_data);
+        g_free(filepath);
+    }
+    
+    gtk_widget_destroy(file_chooser);
+}
+
 void on_window_destroy(GtkWidget *widget, gpointer data) {
     (void)widget;
     (void)data;
@@ -1416,9 +1707,15 @@ void create_chat_screen() {
     entry_message = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_message), "Type your message...");
     g_signal_connect(entry_message, "activate", G_CALLBACK(on_entry_message_activate), NULL);
+    
+    // File send button
+    GtkWidget *btn_send_file = gtk_button_new_with_label("📎 File");
+    g_signal_connect(btn_send_file, "clicked", G_CALLBACK(on_btn_send_file_clicked), NULL);
+    
     btn_send = gtk_button_new_with_label("SEND");
     g_signal_connect(btn_send, "clicked", G_CALLBACK(on_btn_send_clicked), NULL);
     gtk_box_pack_start(GTK_BOX(input_box), entry_message, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(input_box), btn_send_file, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(input_box), btn_send, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(right_panel), input_box, FALSE, FALSE, 0);
     
