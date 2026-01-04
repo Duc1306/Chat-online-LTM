@@ -115,6 +115,90 @@ void print_message(const char *from, const char *msg) {
 }
 
 // ===========================
+// CHAT HISTORY FUNCTIONS
+// ===========================
+
+void save_message_to_history(const char *from, const char *to, const char *message, const char *group_name) {
+    if (!is_logged_in) return;
+    
+    // Tạo tên file lịch sử dựa trên username
+    char filename[512];
+    snprintf(filename, sizeof(filename), "chat_history_%s.txt", current_username);
+    
+    // Mở file ở chế độ append
+    FILE *file = fopen(filename, "a");
+    if (file == NULL) {
+        return; // Không in lỗi để không làm gián đoạn chat
+    }
+    
+    // Lấy thời gian hiện tại
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+    char time_str[64];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+    
+    // Ghi tin nhắn vào file
+    if (group_name && strlen(group_name) > 0) {
+        // Tin nhắn nhóm
+        fprintf(file, "[%s] [Group: %s] %s: %s\n", time_str, group_name, from, message);
+    } else {
+        // Tin nhắn riêng tư
+        fprintf(file, "[%s] %s -> %s: %s\n", time_str, from, to, message);
+    }
+    
+    fclose(file);
+}
+
+void load_chat_history() {
+    if (!is_logged_in) return;
+    
+    char filename[512];
+    snprintf(filename, sizeof(filename), "chat_history_%s.txt", current_username);
+    
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        // File không tồn tại - chưa có lịch sử
+        return;
+    }
+    
+    print_header("CHAT HISTORY");
+    
+    char line[MAX_MESSAGE_LEN + 256]; // Đủ cho message + metadata
+    int count = 0;
+    
+    while (fgets(line, sizeof(line), file) != NULL) {
+        // In mỗi dòng lịch sử
+        set_color(COLOR_CYAN);
+        printf("%s", line);
+        count++;
+    }
+    
+    set_color(COLOR_RESET);
+    
+    if (count == 0) {
+        print_info("No chat history found.");
+    } else {
+        printf("\nTotal messages: %d\n", count);
+    }
+    
+    fclose(file);
+}
+
+void clear_chat_history() {
+    if (!is_logged_in) return;
+    
+    char filename[512];
+    snprintf(filename, sizeof(filename), "chat_history_%s.txt", current_username);
+    
+    // Xóa file
+    if (remove(filename) == 0) {
+        print_success("Chat history cleared!");
+    } else {
+        print_info("No chat history to clear.");
+    }
+}
+
+// ===========================
 // TCP FUNCTIONS
 // ===========================
 
@@ -250,6 +334,8 @@ THREAD_RETURN receive_thread(void *arg) {
                 
             case MSG_PRIVATE_MESSAGE:
                 print_message(msg.from, msg.content);
+                // Lưu tin nhắn nhận được vào lịch sử
+                save_message_to_history(msg.from, current_username, msg.content, NULL);
                 printf("> ");
                 fflush(stdout);
                 break;
@@ -260,6 +346,8 @@ THREAD_RETURN receive_thread(void *arg) {
                 set_color(COLOR_WHITE);
                 printf("%s\n", msg.content);
                 set_color(COLOR_RESET);
+                // Lưu tin nhắn nhóm vào lịch sử
+                save_message_to_history(msg.from, "", msg.content, msg.extra);
                 printf("> ");
                 fflush(stdout);
                 break;
@@ -301,16 +389,21 @@ THREAD_RETURN receive_thread(void *arg) {
                 set_color(COLOR_YELLOW);
                 printf("\n📬 Offline message from %s: %s\n", msg.from, msg.content);
                 set_color(COLOR_RESET);
+                // Lưu tin nhắn offline vào lịch sử
+                save_message_to_history(msg.from, current_username, msg.content, NULL);
                 printf("> ");
                 fflush(stdout);
                 break;
                 
             case MSG_SUCCESS:
                 print_success(msg.content);
-                // Nếu login thành công, set flag
+                // Nếu login thành công, set flag và tải lịch sử
                 if (strstr(msg.content, "Login successful") != NULL) {
                     is_logged_in = true;
                     strncpy(current_username, msg.to, MAX_USERNAME_LEN - 1);
+                    // Tự động tải lịch sử chat sau khi đăng nhập
+                    printf("\n");
+                    load_chat_history();
                 }
                 printf("> ");
                 fflush(stdout);
@@ -476,6 +569,8 @@ void send_private_message() {
         set_color(COLOR_BLUE);
         printf("You → %s: %s\n", recipient, content);
         set_color(COLOR_RESET);
+        // Lưu tin nhắn đã gửi vào lịch sử
+        save_message_to_history(current_username, recipient, content, NULL);
     } else {
         print_error("Failed to send message");
     }
@@ -578,6 +673,8 @@ void send_group_message() {
         set_color(COLOR_CYAN);
         printf("You → [%s]: %s\n", group_name, content);
         set_color(COLOR_RESET);
+        // Lưu tin nhắn nhóm đã gửi vào lịch sử
+        save_message_to_history(current_username, "", content, group_name);
     } else {
         print_error("Failed to send message");
     }
@@ -769,6 +866,10 @@ void print_main_menu() {
     set_color(COLOR_WHITE);
     printf("║   14. View Online Users        15. View Groups           ║\n");
     set_color(COLOR_YELLOW);
+    printf("║  HISTORY:                                                ║\n");
+    set_color(COLOR_WHITE);
+    printf("║   16. View Chat History        17. Clear Chat History    ║\n");
+    set_color(COLOR_YELLOW);
     printf("║  SYSTEM:                                                 ║\n");
     set_color(COLOR_WHITE);
     printf("║   0. Exit                                                ║\n");
@@ -924,6 +1025,19 @@ int main(int argc, char *argv[]) {
             case 13: view_friends_list(); break;
             case 14: view_online_users(); break;
             case 15: view_groups_list(); break;
+            case 16: load_chat_history(); break;
+            case 17: 
+                {
+                    char confirm;
+                    printf("Are you sure you want to clear chat history? (y/n): ");
+                    scanf(" %c", &confirm);
+                    if (confirm == 'y' || confirm == 'Y') {
+                        clear_chat_history();
+                    } else {
+                        print_info("Operation cancelled.");
+                    }
+                }
+                break;
             case 0:
                 is_running = false;
                 print_info("Shutting down...");

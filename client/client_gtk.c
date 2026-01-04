@@ -103,6 +103,95 @@ ChatTab chat_tabs[MAX_CHAT_TABS];
 int chat_tab_count = 0;
 
 // ===========================
+// CHAT HISTORY FUNCTIONS
+// ===========================
+
+void save_message_to_history(const char *from, const char *to, const char *message, const char *group_name) {
+    if (!is_logged_in || strlen(current_username) == 0) return;
+    
+    // Tạo tên file lịch sử dựa trên username
+    char filename[512];
+    snprintf(filename, sizeof(filename), "chat_history_%s.txt", current_username);
+    
+    // Mở file ở chế độ append
+    FILE *file = fopen(filename, "a");
+    if (file == NULL) {
+        return; // Không in lỗi để không làm gián đoạn chat
+    }
+    
+    // Lấy thời gian hiện tại
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+    char time_str[64];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+    
+    // Ghi tin nhắn vào file
+    if (group_name && strlen(group_name) > 0) {
+        // Tin nhắn nhóm
+        fprintf(file, "[%s] [Group: %s] %s: %s\n", time_str, group_name, from, message);
+    } else {
+        // Tin nhắn riêng tư
+        fprintf(file, "[%s] %s -> %s: %s\n", time_str, from, to, message);
+    }
+    
+    fclose(file);
+}
+
+void load_chat_history_to_tab(const char *tab_name, bool is_group) {
+    if (!is_logged_in || strlen(current_username) == 0) return;
+    
+    char filename[512];
+    snprintf(filename, sizeof(filename), "chat_history_%s.txt", current_username);
+    
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        // File không tồn tại - chưa có lịch sử
+        return;
+    }
+    
+    char line[MAX_MESSAGE_LEN + 256];
+    char search_pattern[256];
+    
+    // Tạo pattern tìm kiếm
+    if (is_group) {
+        snprintf(search_pattern, sizeof(search_pattern), "[Group: %s]", tab_name);
+    } else {
+        // Tìm cả tin nhắn gửi và nhận với user này
+        snprintf(search_pattern, sizeof(search_pattern), " %s ", tab_name);
+    }
+    
+    // Đọc và hiển thị lịch sử liên quan đến tab này
+    while (fgets(line, sizeof(line), file) != NULL) {
+        // Kiểm tra xem dòng có liên quan đến tab này không
+        bool relevant = false;
+        
+        if (is_group) {
+            if (strstr(line, search_pattern) != NULL) {
+                relevant = true;
+            }
+        } else {
+            // Cho private chat, kiểm tra cả from và to
+            char pattern1[256], pattern2[256];
+            snprintf(pattern1, sizeof(pattern1), "%s -> %s:", current_username, tab_name);
+            snprintf(pattern2, sizeof(pattern2), "%s -> %s:", tab_name, current_username);
+            
+            if (strstr(line, pattern1) != NULL || strstr(line, pattern2) != NULL) {
+                relevant = true;
+            }
+        }
+        
+        if (relevant) {
+            // Thêm vào chat tab
+            char display[MAX_MESSAGE_LEN + 300];
+            snprintf(display, sizeof(display), "[HISTORY] %s", line);
+            append_to_chat_tab(tab_name, display);
+        }
+    }
+    
+    fclose(file);
+}
+
+// ===========================
 // NETWORK FUNCTIONS
 // ===========================
 
@@ -607,6 +696,9 @@ gboolean create_chat_tab_idle(gpointer data) {
     
     printf("[DEBUG] Created new tab for '%s' (is_group=%d)\n", name, is_group);
     
+    // Tải lịch sử chat cho tab mới này
+    load_chat_history_to_tab(name, is_group);
+    
     g_free(data);
     return FALSE;
 }
@@ -822,11 +914,15 @@ void process_message(const char *raw_data) {
         case MSG_PRIVATE_MESSAGE:
             snprintf(buffer, sizeof(buffer), "[%s]: %s\n", msg.from, msg.content);
             append_to_chat_tab(msg.from, buffer);
+            // Lưu tin nhắn vào lịch sử
+            save_message_to_history(msg.from, current_username, msg.content, NULL);
             break;
             
         case MSG_GROUP_MESSAGE:
             snprintf(buffer, sizeof(buffer), "[%s]: %s\n", msg.from, msg.content);
             append_to_chat_tab(msg.extra, buffer);  // msg.extra = group_name
+            // Lưu tin nhắn nhóm vào lịch sử
+            save_message_to_history(msg.from, "", msg.content, msg.extra);
             break;
             
         case MSG_ONLINE_USERS_LIST:
@@ -836,12 +932,16 @@ void process_message(const char *raw_data) {
         case MSG_USER_ONLINE:
             snprintf(buffer, sizeof(buffer), "--- %s is now online ---\n", msg.content);
             g_idle_add(append_chat_idle, g_strdup(buffer));
+            // Hiển thị thông báo trong tab chat nếu đang chat với user đó
+            append_to_chat_tab(msg.content, buffer);
             send_request(MSG_GET_ONLINE_USERS, "", "");
             break;
             
         case MSG_USER_OFFLINE:
             snprintf(buffer, sizeof(buffer), "--- %s is now offline ---\n", msg.content);
             g_idle_add(append_chat_idle, g_strdup(buffer));
+            // Hiển thị thông báo trong tab chat nếu đang chat với user đó
+            append_to_chat_tab(msg.content, buffer);
             send_request(MSG_GET_ONLINE_USERS, "", "");
             break;
             
@@ -1123,8 +1223,12 @@ void on_btn_send_clicked(GtkWidget *widget, gpointer data) {
     
     if (tab->is_group) {
         send_request(MSG_GROUP_MESSAGE, message, tab->name);
+        // Lưu tin nhắn nhóm đã gửi
+        save_message_to_history(current_username, "", message, tab->name);
     } else {
         send_request(MSG_PRIVATE_MESSAGE, message, tab->name);
+        // Lưu tin nhắn riêng tư đã gửi
+        save_message_to_history(current_username, tab->name, message, NULL);
     }
     
     char display[BUFFER_SIZE];

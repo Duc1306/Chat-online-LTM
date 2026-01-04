@@ -3,6 +3,7 @@ chat_server
 example_client
 *.o
 *.exe
+*.txt
 
 # Data files
 users.txt
