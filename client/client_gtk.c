@@ -1,9 +1,9 @@
 /*
  * ChatOnline Client - GTK+3 GUI for Linux
- * 
+ *
  * === COMPILE ===
  * gcc -o client_gtk client_gtk.c protocol.c `pkg-config --cflags --libs gtk+-3.0` -pthread -Wall
- * 
+ *
  * === RUN ===
  * ./client_gtk
  */
@@ -25,12 +25,13 @@
 // ===========================
 
 // THÊM: Định nghĩa ChatTab struct TRƯỚC khi dùng trong forward declaration
-typedef struct {
+typedef struct
+{
     char name[MAX_USERNAME_LEN];
     bool is_group;
     GtkWidget *textview;
     GtkTextBuffer *buffer;
-    GtkWidget *vbox;  // THÊM: Lưu container
+    GtkWidget *vbox; // THÊM: Lưu container
     bool is_visible;
     int page_num;
 } ChatTab;
@@ -40,7 +41,7 @@ gboolean create_chat_tab_idle(gpointer data);
 gboolean append_to_chat_tab_idle(gpointer data);
 void append_to_chat_tab(const char *name, const char *text);
 void open_chat_tab(const char *name, bool is_group);
-ChatTab* find_chat_tab(const char *name);  // Bây giờ ChatTab đã được định nghĩa
+ChatTab *find_chat_tab(const char *name); // Bây giờ ChatTab đã được định nghĩa
 void on_chat_tab_close(GtkWidget *widget, gpointer data);
 void on_btn_send_file_clicked(GtkWidget *widget, gpointer data);
 void show_file_receive_dialog(const char *from, const char *filename, uint32_t file_size, char *file_data);
@@ -91,7 +92,8 @@ GtkWidget *entry_join_group_name;
 GtkWidget *btn_create_group;
 
 // Switch view data structure
-typedef struct {
+typedef struct
+{
     bool switch_to_chat;
 } SwitchViewData;
 
@@ -106,88 +108,107 @@ int chat_tab_count = 0;
 // CHAT HISTORY FUNCTIONS
 // ===========================
 
-void save_message_to_history(const char *from, const char *to, const char *message, const char *group_name) {
-    if (!is_logged_in || strlen(current_username) == 0) return;
-    
+void save_message_to_history(const char *from, const char *to, const char *message, const char *group_name)
+{
+    if (!is_logged_in || strlen(current_username) == 0)
+        return;
+
     // Tạo tên file lịch sử dựa trên username
     char filename[512];
     snprintf(filename, sizeof(filename), "chat_history_%s.txt", current_username);
-    
+
     // Mở file ở chế độ append
     FILE *file = fopen(filename, "a");
-    if (file == NULL) {
+    if (file == NULL)
+    {
         return; // Không in lỗi để không làm gián đoạn chat
     }
-    
+
     // Lấy thời gian hiện tại
     time_t now = time(NULL);
     struct tm *tm_info = localtime(&now);
     char time_str[64];
     strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
-    
+
     // Ghi tin nhắn vào file
-    if (group_name && strlen(group_name) > 0) {
+    if (group_name && strlen(group_name) > 0)
+    {
         // Tin nhắn nhóm
         fprintf(file, "[%s] [Group: %s] %s: %s\n", time_str, group_name, from, message);
-    } else {
+    }
+    else
+    {
         // Tin nhắn riêng tư
         fprintf(file, "[%s] %s -> %s: %s\n", time_str, from, to, message);
     }
-    
+
     fclose(file);
 }
 
-void load_chat_history_to_tab(const char *tab_name, bool is_group) {
-    if (!is_logged_in || strlen(current_username) == 0) return;
-    
+void load_chat_history_to_tab(const char *tab_name, bool is_group)
+{
+    if (!is_logged_in || strlen(current_username) == 0)
+        return;
+
     char filename[512];
     snprintf(filename, sizeof(filename), "chat_history_%s.txt", current_username);
-    
+
     FILE *file = fopen(filename, "r");
-    if (file == NULL) {
+    if (file == NULL)
+    {
         // File không tồn tại - chưa có lịch sử
         return;
     }
-    
+
     char line[MAX_MESSAGE_LEN + 256];
     char search_pattern[256];
-    
+
     // Tạo pattern tìm kiếm
-    if (is_group) {
+    if (is_group)
+    {
         snprintf(search_pattern, sizeof(search_pattern), "[Group: %s]", tab_name);
-    } else {
+    }
+    else
+    {
         // Tìm cả tin nhắn gửi và nhận với user này
         snprintf(search_pattern, sizeof(search_pattern), " %s ", tab_name);
     }
-    
+
     // Đọc và hiển thị lịch sử liên quan đến tab này
-    while (fgets(line, sizeof(line), file) != NULL) {
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
         // Kiểm tra xem dòng có liên quan đến tab này không
         bool relevant = false;
-        
-        if (is_group) {
-            if (strstr(line, search_pattern) != NULL) {
+
+        if (is_group)
+        {
+            if (strstr(line, search_pattern) != NULL)
+            {
                 relevant = true;
             }
-        } else {
+        }
+        else
+        {
             // Cho private chat, kiểm tra cả from và to
             char pattern1[256], pattern2[256];
             snprintf(pattern1, sizeof(pattern1), "%s -> %s:", current_username, tab_name);
             snprintf(pattern2, sizeof(pattern2), "%s -> %s:", tab_name, current_username);
-            
-            if (strstr(line, pattern1) != NULL || strstr(line, pattern2) != NULL) {
+
+            if (strstr(line, pattern1) != NULL || strstr(line, pattern2) != NULL)
+            {
                 relevant = true;
             }
         }
-        
-        if (relevant) {
+
+        if (relevant)
+        {
             // Thêm vào chat tab
             char display[MAX_MESSAGE_LEN + 300];
             snprintf(display, sizeof(display), "[HISTORY] %s", line);
             append_to_chat_tab(tab_name, display);
         }
     }
-    
+
     fclose(file);
 }
 
@@ -195,54 +216,67 @@ void load_chat_history_to_tab(const char *tab_name, bool is_group) {
 // NETWORK FUNCTIONS
 // ===========================
 
-int send_packet(const char *data, int len) {
-    if (client_socket < 0) return -1;
-    
+int send_packet(const char *data, int len)
+{
+    if (client_socket < 0)
+        return -1;
+
     uint32_t net_len = htonl((uint32_t)len);
-    if (send(client_socket, &net_len, sizeof(net_len), 0) <= 0) return -1;
-    
+    if (send(client_socket, &net_len, sizeof(net_len), 0) <= 0)
+        return -1;
+
     int total_sent = 0;
-    while (total_sent < len) {
+    while (total_sent < len)
+    {
         int sent = send(client_socket, data + total_sent, len - total_sent, 0);
-        if (sent <= 0) return -1;
+        if (sent <= 0)
+            return -1;
         total_sent += sent;
     }
     return total_sent;
 }
 
-int recv_packet(char *buffer, size_t buffer_size) {
+int recv_packet(char *buffer, size_t buffer_size)
+{
     uint32_t msg_length;
-    size_t total_received = 0;  // ĐỔI: int -> size_t
-    
-    while (total_received < sizeof(uint32_t)) {
+    size_t total_received = 0; // ĐỔI: int -> size_t
+
+    while (total_received < sizeof(uint32_t))
+    {
         int bytes = recv(client_socket, ((char *)&msg_length) + total_received,
-                        sizeof(uint32_t) - total_received, 0);
-        if (bytes <= 0) return bytes;
+                         sizeof(uint32_t) - total_received, 0);
+        if (bytes <= 0)
+            return bytes;
         total_received += bytes;
     }
-    
+
     msg_length = ntohl(msg_length);
-    if (msg_length == 0 || msg_length > buffer_size - 1) return -1;
-    
+    if (msg_length == 0 || msg_length > buffer_size - 1)
+        return -1;
+
     total_received = 0;
-    while (total_received < msg_length) {  // Bây giờ cùng kiểu size_t
+    while (total_received < msg_length)
+    { // Bây giờ cùng kiểu size_t
         int bytes = recv(client_socket, buffer + total_received,
-                        msg_length - total_received, 0);
-        if (bytes <= 0) return bytes;
+                         msg_length - total_received, 0);
+        if (bytes <= 0)
+            return bytes;
         total_received += bytes;
     }
-    
+
     buffer[total_received] = '\0';
-    return (int)total_received;  // Cast về int khi return
+    return (int)total_received; // Cast về int khi return
 }
 
-void send_request(int type, const char *content, const char *to) {
+void send_request(int type, const char *content, const char *to)
+{
     Message msg;
     create_response_message(&msg, type, current_username, to, content);
-    
+
     char buffer[BUFFER_SIZE];
     int len = serialize_message(&msg, buffer, sizeof(buffer));
-    if (len > 0) {
+    if (len > 0)
+    {
         send_packet(buffer, len);
     }
 }
@@ -250,52 +284,104 @@ void send_request(int type, const char *content, const char *to) {
 // ===========================
 // GUI UPDATE FUNCTIONS (Thread-safe)
 // ===========================
+typedef struct
+{
+    char username[MAX_USERNAME_LEN];
+} RemoveFriendUIData;
 
-gboolean switch_view_idle(gpointer data) {
+gboolean remove_friend_row_idle(gpointer data)
+{
+    RemoveFriendUIData *d = (RemoveFriendUIData *)data;
+
+    GList *rows = gtk_container_get_children(GTK_CONTAINER(listbox_friends));
+    for (GList *iter = rows; iter != NULL; iter = iter->next)
+    {
+        GtkWidget *row = GTK_WIDGET(iter->data);
+        GtkWidget *child = gtk_bin_get_child(GTK_BIN(row));
+
+        if (GTK_IS_CONTAINER(child))
+        {
+            GList *children = gtk_container_get_children(GTK_CONTAINER(child));
+            for (GList *c = children; c != NULL; c = c->next)
+            {
+                if (GTK_IS_LABEL(c->data))
+                {
+                    const char *name = gtk_label_get_text(GTK_LABEL(c->data));
+                    if (strcmp(name, d->username) == 0)
+                    {
+                        gtk_widget_destroy(row);
+                        g_list_free(children);
+                        g_list_free(rows);
+                        g_free(d);
+                        return FALSE;
+                    }
+                }
+            }
+            g_list_free(children);
+        }
+    }
+
+    g_list_free(rows);
+    g_free(d);
+    return FALSE;
+}
+
+gboolean switch_view_idle(gpointer data)
+{
     SwitchViewData *view_data = (SwitchViewData *)data;
-    
-    if (view_data->switch_to_chat) {
+
+    if (view_data->switch_to_chat)
+    {
         gtk_stack_set_visible_child_name(GTK_STACK(main_stack), "chat");
-    } else {
+    }
+    else
+    {
         gtk_stack_set_visible_child_name(GTK_STACK(main_stack), "login");
     }
-    
+
     g_free(view_data);
     return FALSE;
 }
 
-gboolean append_chat_idle(gpointer data) {
+gboolean append_chat_idle(gpointer data)
+{
     char *text = (char *)data;
-    
+
     // Main chat area không tồn tại trong phiên bản này
     // Các thông báo chung được bỏ qua
     printf("[INFO] %s", text);
-    
+
     g_free(text);
     return FALSE;
 }
 
-gboolean update_user_list_idle(gpointer data) {
+gboolean update_user_list_idle(gpointer data)
+{
     char *user_data = (char *)data;
-    
+
     // Clear list
     GList *children = gtk_container_get_children(GTK_CONTAINER(listbox_users));
-    for (GList *iter = children; iter != NULL; iter = g_list_next(iter)) {
+    for (GList *iter = children; iter != NULL; iter = g_list_next(iter))
+    {
         gtk_widget_destroy(GTK_WIDGET(iter->data));
     }
     g_list_free(children);
-    
-    if (!user_data || strlen(user_data) == 0) {
+
+    if (!user_data || strlen(user_data) == 0)
+    {
         g_free(user_data);
         return FALSE;
     }
-    
+
     char *token = strtok(user_data, ",");
-    while (token) {
+    while (token)
+    {
         // Trim whitespace
-        while (*token == ' ') token++;
-        
-        if (strcmp(token, current_username) != 0) {
+        while (*token == ' ')
+            token++;
+
+        if (strcmp(token, current_username) != 0)
+        {
             GtkWidget *row = gtk_list_box_row_new();
             GtkWidget *label = gtk_label_new(token);
             gtk_label_set_xalign(GTK_LABEL(label), 0.0);
@@ -305,24 +391,28 @@ gboolean update_user_list_idle(gpointer data) {
         }
         token = strtok(NULL, ",");
     }
-    
+
     g_free(user_data);
     return FALSE;
 }
 
-void update_user_list(const char *data) {
-    if (!data) return;
+void update_user_list(const char *data)
+{
+    if (!data)
+        return;
     g_idle_add(update_user_list_idle, g_strdup(data));
 }
 
-typedef struct {
+typedef struct
+{
     char *message;
     int is_error;
 } DialogData;
 
-gboolean show_dialog_idle(gpointer data) {
+gboolean show_dialog_idle(gpointer data)
+{
     DialogData *dialog_data = (DialogData *)data;
-    
+
     GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
                                                GTK_DIALOG_DESTROY_WITH_PARENT,
                                                dialog_data->is_error ? GTK_MESSAGE_ERROR : GTK_MESSAGE_INFO,
@@ -330,20 +420,22 @@ gboolean show_dialog_idle(gpointer data) {
                                                "%s", dialog_data->message);
     gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
-    
+
     g_free(dialog_data->message);
     g_free(dialog_data);
     return FALSE;
 }
 
-void show_error_dialog(const char *message) {
+void show_error_dialog(const char *message)
+{
     DialogData *data = g_malloc(sizeof(DialogData));
     data->message = g_strdup(message);
     data->is_error = 1;
     g_idle_add(show_dialog_idle, data);
 }
 
-void show_info_dialog(const char *message) {
+void show_info_dialog(const char *message)
+{
     DialogData *data = g_malloc(sizeof(DialogData));
     data->message = g_strdup(message);
     data->is_error = 0;
@@ -351,117 +443,137 @@ void show_info_dialog(const char *message) {
 }
 
 // Friend list update
-gboolean update_friend_list_idle(gpointer data) {
+gboolean update_friend_list_idle(gpointer data)
+{
     char *friend_data = (char *)data;
-    
+
     // Clear list
     GList *children = gtk_container_get_children(GTK_CONTAINER(listbox_friends));
-    for (GList *iter = children; iter != NULL; iter = g_list_next(iter)) {
+    for (GList *iter = children; iter != NULL; iter = g_list_next(iter))
+    {
         gtk_widget_destroy(GTK_WIDGET(iter->data));
     }
     g_list_free(children);
-    
-    if (!friend_data || strlen(friend_data) == 0) {
+
+    if (!friend_data || strlen(friend_data) == 0)
+    {
         g_free(friend_data);
         return FALSE;
     }
-    
+
     char *token = strtok(friend_data, ",");
-    while (token) {
-        while (*token == ' ') token++;
-        
+    while (token)
+    {
+        while (*token == ' ')
+            token++;
+
         GtkWidget *row = gtk_list_box_row_new();
         GtkWidget *label = gtk_label_new(token);
         gtk_label_set_xalign(GTK_LABEL(label), 0.0);
         gtk_container_add(GTK_CONTAINER(row), label);
         gtk_widget_show_all(row);
         gtk_container_add(GTK_CONTAINER(listbox_friends), row);
-        
+
         token = strtok(NULL, ",");
     }
-    
+
     g_free(friend_data);
     return FALSE;
 }
 
-void update_friend_list(const char *data) {
-    if (!data) return;
+void update_friend_list(const char *data)
+{
+    if (!data)
+        return;
     g_idle_add(update_friend_list_idle, g_strdup(data));
 }
 
 // Group list update
-gboolean update_group_list_idle(gpointer data) {
+gboolean update_group_list_idle(gpointer data)
+{
     char *group_data = (char *)data;
-    
+
     // Clear list
     GList *children = gtk_container_get_children(GTK_CONTAINER(listbox_groups));
-    for (GList *iter = children; iter != NULL; iter = g_list_next(iter)) {
+    for (GList *iter = children; iter != NULL; iter = g_list_next(iter))
+    {
         gtk_widget_destroy(GTK_WIDGET(iter->data));
     }
     g_list_free(children);
-    
-    if (!group_data || strlen(group_data) == 0) {
+
+    if (!group_data || strlen(group_data) == 0)
+    {
         g_free(group_data);
         return FALSE;
     }
-    
+
     char *token = strtok(group_data, ",");
-    while (token) {
-        while (*token == ' ') token++;
-        
+    while (token)
+    {
+        while (*token == ' ')
+            token++;
+
         GtkWidget *row = gtk_list_box_row_new();
         GtkWidget *label = gtk_label_new(token);
         gtk_label_set_xalign(GTK_LABEL(label), 0.0);
         gtk_container_add(GTK_CONTAINER(row), label);
         gtk_widget_show_all(row);
         gtk_container_add(GTK_CONTAINER(listbox_groups), row);
-        
+
         token = strtok(NULL, ",");
     }
-    
+
     g_free(group_data);
     return FALSE;
 }
 
-void update_group_list(const char *data) {
-    if (!data) return;
+void update_group_list(const char *data)
+{
+    if (!data)
+        return;
     g_idle_add(update_group_list_idle, g_strdup(data));
 }
 
 // Friend request dialog
-typedef struct {
+typedef struct
+{
     char *username;
 } FriendRequestData;
 
-gboolean show_friend_request_dialog_idle(gpointer data) {
+gboolean show_friend_request_dialog_idle(gpointer data)
+{
     FriendRequestData *req_data = (FriendRequestData *)data;
-    
+
     GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
                                                GTK_DIALOG_DESTROY_WITH_PARENT,
                                                GTK_MESSAGE_QUESTION,
                                                GTK_BUTTONS_YES_NO,
                                                "Friend request from: %s\nAccept?", req_data->username);
-    
+
     int response = gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
-    
+
     // Send response to server
     // to = người gửi request (req_data->username)
     // from = current_username (tự động set trong send_request)
-    if (response == GTK_RESPONSE_YES) {
+    if (response == GTK_RESPONSE_YES)
+    {
         send_request(MSG_FRIEND_ACCEPT, "", req_data->username);
         // Refresh friend list ngay sau khi accept
         send_request(MSG_GET_FRIENDS, "", "");
-    } else {
+    }
+    else
+    {
         send_request(MSG_FRIEND_REJECT, "", req_data->username);
     }
-    
+
     g_free(req_data->username);
     g_free(req_data);
     return FALSE;
 }
 
-void show_friend_request_dialog(const char *username) {
+void show_friend_request_dialog(const char *username)
+{
     FriendRequestData *data = g_malloc(sizeof(FriendRequestData));
     data->username = g_strdup(username);
     g_idle_add(show_friend_request_dialog_idle, data);
@@ -471,147 +583,180 @@ void show_friend_request_dialog(const char *username) {
 // CHAT TAB MANAGEMENT
 // ===========================
 
-ChatTab* find_chat_tab(const char *name) {
-    for (int i = 0; i < chat_tab_count; i++) {
-        if (strcmp(chat_tabs[i].name, name) == 0) {
+ChatTab *find_chat_tab(const char *name)
+{
+    for (int i = 0; i < chat_tab_count; i++)
+    {
+        if (strcmp(chat_tabs[i].name, name) == 0)
+        {
             return &chat_tabs[i];
         }
     }
     return NULL;
 }
 
-void open_chat_tab(const char *name, bool is_group) {
-    typedef struct {
+void open_chat_tab(const char *name, bool is_group)
+{
+    typedef struct
+    {
         char name[MAX_USERNAME_LEN];
         bool is_group;
     } ChatTabRequest;
-    
+
     ChatTabRequest *req = g_malloc(sizeof(ChatTabRequest));
     strncpy(req->name, name, MAX_USERNAME_LEN - 1);
     req->name[MAX_USERNAME_LEN - 1] = '\0';
     req->is_group = is_group;
-    
+
     g_idle_add(create_chat_tab_idle, req);
 }
 
-gboolean append_to_chat_tab_idle(gpointer data) {
-    typedef struct {
+gboolean append_to_chat_tab_idle(gpointer data)
+{
+    typedef struct
+    {
         char name[MAX_USERNAME_LEN];
         char text[BUFFER_SIZE];
     } ChatMessage;
-    
+
     ChatMessage *msg = (ChatMessage *)data;
-    
+
     // Validate name không rỗng
-    if (msg->name[0] == '\0') {
+    if (msg->name[0] == '\0')
+    {
         printf("[ERROR] append_to_chat_tab_idle: name is empty\n");
         g_free(data);
         return FALSE;
     }
-    
+
     ChatTab *tab = find_chat_tab(msg->name);
-    
+
     // Debug: log trạng thái tab
-    if (tab != NULL) {
+    if (tab != NULL)
+    {
         printf("[DEBUG] append_to_chat_tab_idle for '%s': visible=%d, buffer=%p, textview=%p\n",
-               msg->name, tab->is_visible, (void*)tab->buffer, (void*)tab->textview);
+               msg->name, tab->is_visible, (void *)tab->buffer, (void *)tab->textview);
     }
-    
+
     // Kiểm tra tab hợp lệ, đang visible, và có buffer & textview hợp lệ
-    if (tab != NULL && tab->is_visible && 
+    if (tab != NULL && tab->is_visible &&
         tab->buffer != NULL && GTK_IS_TEXT_BUFFER(tab->buffer) &&
-        tab->textview != NULL && GTK_IS_TEXT_VIEW(tab->textview)) {
+        tab->textview != NULL && GTK_IS_TEXT_VIEW(tab->textview))
+    {
         GtkTextIter iter;
         gtk_text_buffer_get_end_iter(tab->buffer, &iter);
         gtk_text_buffer_insert(tab->buffer, &iter, msg->text, -1);
-        
+
         // Auto scroll
         GtkTextMark *mark = gtk_text_buffer_get_insert(tab->buffer);
         gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(tab->textview), mark, 0.0, TRUE, 0.0, 1.0);
-    } else {
-        if (tab == NULL) {
+    }
+    else
+    {
+        if (tab == NULL)
+        {
             printf("[ERROR] Tab not found for '%s'\n", msg->name);
-        } else if (!tab->is_visible) {
-            printf("[ERROR] Tab '%s' is not visible (buffer=%p, textview=%p)\n", 
-                   msg->name, (void*)tab->buffer, (void*)tab->textview);
-        } else if (tab->buffer == NULL || !GTK_IS_TEXT_BUFFER(tab->buffer)) {
-            printf("[ERROR] Invalid buffer for '%s' (buffer=%p, is_visible=%d)\n", 
-                   msg->name, (void*)tab->buffer, tab->is_visible);
-        } else if (tab->textview == NULL || !GTK_IS_TEXT_VIEW(tab->textview)) {
-            printf("[ERROR] Invalid textview for '%s' (textview=%p, is_visible=%d)\n", 
-                   msg->name, (void*)tab->textview, tab->is_visible);
+        }
+        else if (!tab->is_visible)
+        {
+            printf("[ERROR] Tab '%s' is not visible (buffer=%p, textview=%p)\n",
+                   msg->name, (void *)tab->buffer, (void *)tab->textview);
+        }
+        else if (tab->buffer == NULL || !GTK_IS_TEXT_BUFFER(tab->buffer))
+        {
+            printf("[ERROR] Invalid buffer for '%s' (buffer=%p, is_visible=%d)\n",
+                   msg->name, (void *)tab->buffer, tab->is_visible);
+        }
+        else if (tab->textview == NULL || !GTK_IS_TEXT_VIEW(tab->textview))
+        {
+            printf("[ERROR] Invalid textview for '%s' (textview=%p, is_visible=%d)\n",
+                   msg->name, (void *)tab->textview, tab->is_visible);
         }
     }
-    
+
     g_free(data);
     return FALSE;
 }
 
-void on_chat_tab_close(GtkWidget *widget, gpointer data) {
+void on_chat_tab_close(GtkWidget *widget, gpointer data)
+{
     (void)widget;
     GtkWidget *vbox = GTK_WIDGET(data);
     int page_num = gtk_notebook_page_num(GTK_NOTEBOOK(chat_notebook), vbox);
-    
-    if (page_num >= 0 && page_num < chat_tab_count) {
+
+    if (page_num >= 0 && page_num < chat_tab_count)
+    {
         // Tìm tab tương ứng
         ChatTab *tab = NULL;
-        for (int i = 0; i < chat_tab_count; i++) {
-            if (chat_tabs[i].vbox == vbox) {
+        for (int i = 0; i < chat_tab_count; i++)
+        {
+            if (chat_tabs[i].vbox == vbox)
+            {
                 tab = &chat_tabs[i];
                 break;
             }
         }
-        
-        if (tab) {
+
+        if (tab)
+        {
             // Đánh dấu tab là ẩn
             tab->is_visible = false;
-            
+
             // TĂNG REFERENCE COUNT trước khi remove (để widget không bị destroy)
             g_object_ref(tab->vbox);
-            
+
             // Xóa khỏi notebook
             gtk_notebook_remove_page(GTK_NOTEBOOK(chat_notebook), page_num);
-            
+
             // Cập nhật page_num cho các tab còn lại
-            for (int i = 0; i < chat_tab_count; i++) {
-                if (chat_tabs[i].is_visible && chat_tabs[i].vbox) {
-                    int current_page = gtk_notebook_page_num(GTK_NOTEBOOK(chat_notebook), 
+            for (int i = 0; i < chat_tab_count; i++)
+            {
+                if (chat_tabs[i].is_visible && chat_tabs[i].vbox)
+                {
+                    int current_page = gtk_notebook_page_num(GTK_NOTEBOOK(chat_notebook),
                                                              chat_tabs[i].vbox);
-                    if (current_page >= 0) {
+                    if (current_page >= 0)
+                    {
                         chat_tabs[i].page_num = current_page;
                     }
                 }
             }
-            
+
             printf("[DEBUG] Closed tab '%s', kept chat history (ref_count increased)\n", tab->name);
         }
     }
 }
 
-gboolean create_chat_tab_idle(gpointer data) {
-    typedef struct {
+gboolean create_chat_tab_idle(gpointer data)
+{
+    typedef struct
+    {
         char name[MAX_USERNAME_LEN];
         bool is_group;
     } ChatTabRequest;
-    
+
     ChatTabRequest *req = (ChatTabRequest *)data;
     const char *name = req->name;
     bool is_group = req->is_group;
-    
+
     // Kiểm tra tab đã tồn tại chưa
     ChatTab *existing = find_chat_tab(name);
-    if (existing != NULL) {
-        if (existing->is_visible) {
+    if (existing != NULL)
+    {
+        if (existing->is_visible)
+        {
             // Tab đang hiển thị → chuyển đến tab đó và update is_group
             existing->is_group = is_group;
             gtk_notebook_set_current_page(GTK_NOTEBOOK(chat_notebook), existing->page_num);
             g_free(data);
             return FALSE;
-        } else {
+        }
+        else
+        {
             // Tab bị ẩn → MỞ LẠI
             existing->is_visible = true;
-            existing->is_group = is_group;  // Update is_group flag
-            
+            existing->is_group = is_group; // Update is_group flag
+
             // Tab label với nút close MỚI
             GtkWidget *tab_label_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
             GtkWidget *tab_label = gtk_label_new(name);
@@ -620,46 +765,47 @@ gboolean create_chat_tab_idle(gpointer data) {
             gtk_box_pack_start(GTK_BOX(tab_label_box), tab_label, FALSE, FALSE, 0);
             gtk_box_pack_start(GTK_BOX(tab_label_box), close_button, FALSE, FALSE, 0);
             gtk_widget_show_all(tab_label_box);
-            
+
             // Thêm lại vào notebook
-            int page_num = gtk_notebook_append_page(GTK_NOTEBOOK(chat_notebook), 
+            int page_num = gtk_notebook_append_page(GTK_NOTEBOOK(chat_notebook),
                                                     existing->vbox, tab_label_box);
-            
+
             // GIẢM REFERENCE COUNT sau khi add (notebook đã giữ reference)
             g_object_unref(existing->vbox);
-            
+
             gtk_widget_show_all(existing->vbox);
             gtk_notebook_set_current_page(GTK_NOTEBOOK(chat_notebook), page_num);
-            
+
             existing->page_num = page_num;
-            
+
             // Callback đóng tab
-            g_signal_connect(close_button, "clicked", 
-                           G_CALLBACK(on_chat_tab_close), existing->vbox);
-            
+            g_signal_connect(close_button, "clicked",
+                             G_CALLBACK(on_chat_tab_close), existing->vbox);
+
             printf("[DEBUG] Reopened tab for '%s' with chat history\n", name);
-            
+
             g_free(data);
             return FALSE;
         }
     }
-    
+
     // Tạo tab mới hoàn toàn
-    if (chat_tab_count >= MAX_CHAT_TABS) {
+    if (chat_tab_count >= MAX_CHAT_TABS)
+    {
         show_error_dialog("Maximum chat tabs reached!");
         g_free(data);
         return FALSE;
     }
-    
+
     ChatTab *tab = &chat_tabs[chat_tab_count];
     strncpy(tab->name, name, MAX_USERNAME_LEN - 1);
     tab->is_group = is_group;
     tab->is_visible = true;
-    
+
     // Create tab content
     tab->vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_container_set_border_width(GTK_CONTAINER(tab->vbox), 5);
-    
+
     // Chat history
     GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
@@ -668,10 +814,10 @@ gboolean create_chat_tab_idle(gpointer data) {
     gtk_text_view_set_editable(GTK_TEXT_VIEW(tab->textview), FALSE);
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(tab->textview), GTK_WRAP_WORD);
     tab->buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(tab->textview));
-    
+
     gtk_container_add(GTK_CONTAINER(scroll), tab->textview);
     gtk_box_pack_start(GTK_BOX(tab->vbox), scroll, TRUE, TRUE, 0);
-    
+
     // Tab label with close button
     GtkWidget *tab_label_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     GtkWidget *tab_label = gtk_label_new(name);
@@ -680,92 +826,105 @@ gboolean create_chat_tab_idle(gpointer data) {
     gtk_box_pack_start(GTK_BOX(tab_label_box), tab_label, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(tab_label_box), close_button, FALSE, FALSE, 0);
     gtk_widget_show_all(tab_label_box);
-    
+
     // Add tab to notebook
     int page_num = gtk_notebook_append_page(GTK_NOTEBOOK(chat_notebook), tab->vbox, tab_label_box);
     gtk_widget_show_all(tab->vbox);
     gtk_notebook_set_current_page(GTK_NOTEBOOK(chat_notebook), page_num);
-    
+
     tab->page_num = page_num;
-    
+
     // Close button callback
-    g_signal_connect(close_button, "clicked", 
-                   G_CALLBACK(on_chat_tab_close), tab->vbox);
-    
+    g_signal_connect(close_button, "clicked",
+                     G_CALLBACK(on_chat_tab_close), tab->vbox);
+
     chat_tab_count++;
-    
+
     printf("[DEBUG] Created new tab for '%s' (is_group=%d)\n", name, is_group);
-    
+
     // Tải lịch sử chat cho tab mới này
     load_chat_history_to_tab(name, is_group);
-    
+
     g_free(data);
     return FALSE;
 }
 
 // Sửa hàm append_to_chat_tab - TỰ ĐỘNG MỞ TAB KHI NHẬN TIN NHẮN:
-void append_to_chat_tab(const char *name, const char *text) {
-    typedef struct {
+void append_to_chat_tab(const char *name, const char *text)
+{
+    typedef struct
+    {
         char name[MAX_USERNAME_LEN];
         char text[BUFFER_SIZE];
     } ChatMessage;
-    
+
     // Validate name không rỗng
-    if (name == NULL || name[0] == '\0') {
+    if (name == NULL || name[0] == '\0')
+    {
         printf("[ERROR] Cannot append to chat tab: name is empty\n");
         return;
     }
-    
+
     ChatTab *tab = find_chat_tab(name);
-    
-    if (tab == NULL) {
+
+    if (tab == NULL)
+    {
         // CHƯA CÓ TAB → TẠO MỚI TỰ ĐỘNG
         printf("[DEBUG] Auto-opening new chat tab for: %s\n", name);
         open_chat_tab(name, false);
         // Đợi tab được tạo VÀ widgets sẵn sàng
         int max_wait = 100; // max 1 second
-        while (find_chat_tab(name) == NULL && max_wait > 0) {
+        while (find_chat_tab(name) == NULL && max_wait > 0)
+        {
             usleep(10000); // 10ms
             max_wait--;
         }
         tab = find_chat_tab(name);
-        if (tab == NULL || max_wait == 0) {
+        if (tab == NULL || max_wait == 0)
+        {
             printf("[ERROR] Failed to create tab for '%s'\n", name);
             return;
         }
         // Đợi widgets sẵn sàng
         max_wait = 100;
-        while ((tab->buffer == NULL || tab->textview == NULL) && max_wait > 0) {
+        while ((tab->buffer == NULL || tab->textview == NULL) && max_wait > 0)
+        {
             usleep(10000); // 10ms
             max_wait--;
         }
-        if (max_wait == 0) {
+        if (max_wait == 0)
+        {
             printf("[ERROR] Timeout waiting for widgets in new tab '%s'\n", name);
             return;
         }
-    } else if (!tab->is_visible) {
+    }
+    else if (!tab->is_visible)
+    {
         // TAB BỊ ĐÓNG → MỞ LẠI TỰ ĐỘNG
         printf("[DEBUG] Auto-reopening closed chat tab for: %s\n", name);
         open_chat_tab(name, false);
         // Đợi tab được mở lại VÀ widgets sẵn sàng
         int max_wait = 100; // max 1 second
-        while ((!tab->is_visible || tab->buffer == NULL || tab->textview == NULL) && max_wait > 0) {
+        while ((!tab->is_visible || tab->buffer == NULL || tab->textview == NULL) && max_wait > 0)
+        {
             usleep(10000); // 10ms
             max_wait--;
         }
-        if (max_wait == 0) {
+        if (max_wait == 0)
+        {
             printf("[ERROR] Timeout waiting for tab '%s' to reopen\n", name);
             return;
         }
     }
-    
+
     // Đảm bảo buffer và textview hợp lệ trước khi append
     if (tab->buffer == NULL || !GTK_IS_TEXT_BUFFER(tab->buffer) ||
-        tab->textview == NULL || !GTK_IS_TEXT_VIEW(tab->textview)) {
+        tab->textview == NULL || !GTK_IS_TEXT_VIEW(tab->textview))
+    {
         printf("[ERROR] Tab '%s' widgets not ready\n", name);
         return;
     }
-    
+
     // Append message
     ChatMessage *msg = g_malloc(sizeof(ChatMessage));
     strncpy(msg->name, name, MAX_USERNAME_LEN - 1);
@@ -777,34 +936,37 @@ void append_to_chat_tab(const char *name, const char *text) {
 // FILE TRANSFER FUNCTIONS
 // ===========================
 
-typedef struct {
+typedef struct
+{
     char from[MAX_USERNAME_LEN];
     char filename[MAX_FILENAME_LEN];
     uint32_t file_size;
-    char *file_data;  // Already received file data
+    char *file_data; // Already received file data
 } FileReceiveData;
 
-gboolean show_file_receive_dialog_idle(gpointer data) {
+gboolean show_file_receive_dialog_idle(gpointer data)
+{
     FileReceiveData *file_data = (FileReceiveData *)data;
-    
+
     char message[BUFFER_SIZE];
-    snprintf(message, sizeof(message), 
+    snprintf(message, sizeof(message),
              "%s wants to send you a file:\n\nFilename: %s\nSize: %.2f KB\n\nDo you want to accept?",
              file_data->from, file_data->filename, file_data->file_size / 1024.0);
-    
+
     GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
                                                GTK_DIALOG_MODAL,
                                                GTK_MESSAGE_QUESTION,
                                                GTK_BUTTONS_YES_NO,
                                                "%s", message);
-    
+
     int response = gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
-    
-    if (response == GTK_RESPONSE_YES) {
+
+    if (response == GTK_RESPONSE_YES)
+    {
         // Accept file
         send_request(MSG_FILE_ACCEPT, "", file_data->from);
-        
+
         // Open file chooser to select save location
         GtkWidget *file_chooser = gtk_file_chooser_dialog_new(
             "Save File",
@@ -813,69 +975,80 @@ gboolean show_file_receive_dialog_idle(gpointer data) {
             "Cancel", GTK_RESPONSE_CANCEL,
             "Save", GTK_RESPONSE_ACCEPT,
             NULL);
-        
+
         gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(file_chooser), file_data->filename);
         gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(file_chooser), TRUE);
-        
-        if (gtk_dialog_run(GTK_DIALOG(file_chooser)) == GTK_RESPONSE_ACCEPT) {
+
+        if (gtk_dialog_run(GTK_DIALOG(file_chooser)) == GTK_RESPONSE_ACCEPT)
+        {
             char *save_path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(file_chooser));
-            
+
             // Save file (data already received)
-            if (file_data->file_data != NULL) {
+            if (file_data->file_data != NULL)
+            {
                 FILE *fp = fopen(save_path, "wb");
-                if (fp != NULL) {
+                if (fp != NULL)
+                {
                     fwrite(file_data->file_data, 1, file_data->file_size, fp);
                     fclose(fp);
-                    
+
                     char success_msg[BUFFER_SIZE];
-                    snprintf(success_msg, sizeof(success_msg), 
+                    snprintf(success_msg, sizeof(success_msg),
                              "File saved successfully to:\n%s", save_path);
                     show_info_dialog(success_msg);
-                    
+
                     // Log to chat
                     char log_msg[BUFFER_SIZE];
-                    snprintf(log_msg, sizeof(log_msg), 
+                    snprintf(log_msg, sizeof(log_msg),
                              "[FILE] Received '%s' from %s (%.2f KB)\n",
                              file_data->filename, file_data->from, file_data->file_size / 1024.0);
                     append_to_chat_tab(file_data->from, log_msg);
-                } else {
+                }
+                else
+                {
                     show_error_dialog("Failed to save file");
                 }
-            } else {
+            }
+            else
+            {
                 show_error_dialog("File data not available");
             }
-            
+
             g_free(save_path);
         }
-        
+
         gtk_widget_destroy(file_chooser);
-    } else {
+    }
+    else
+    {
         // Reject file
         send_request(MSG_FILE_REJECT, "", file_data->from);
-        
+
         char reject_msg[BUFFER_SIZE];
-        snprintf(reject_msg, sizeof(reject_msg), 
+        snprintf(reject_msg, sizeof(reject_msg),
                  "[FILE] Rejected file '%s' from %s\n",
                  file_data->filename, file_data->from);
         append_to_chat_tab(file_data->from, reject_msg);
     }
-    
+
     // Free file data buffer
-    if (file_data->file_data != NULL) {
+    if (file_data->file_data != NULL)
+    {
         free(file_data->file_data);
     }
     g_free(file_data);
     return FALSE;
 }
 
-void show_file_receive_dialog(const char *from, const char *filename, uint32_t file_size, char *file_data) {
+void show_file_receive_dialog(const char *from, const char *filename, uint32_t file_size, char *file_data)
+{
     FileReceiveData *data = g_malloc(sizeof(FileReceiveData));
     strncpy(data->from, from, MAX_USERNAME_LEN - 1);
     data->from[MAX_USERNAME_LEN - 1] = '\0';
     strncpy(data->filename, filename, MAX_FILENAME_LEN - 1);
     data->filename[MAX_FILENAME_LEN - 1] = '\0';
     data->file_size = file_size;
-    data->file_data = file_data;  // Transfer ownership
+    data->file_data = file_data; // Transfer ownership
     g_idle_add(show_file_receive_dialog_idle, data);
 }
 
@@ -883,189 +1056,213 @@ void show_file_receive_dialog(const char *from, const char *filename, uint32_t f
 // MESSAGE PROCESSING
 // ===========================
 
-void process_message(const char *raw_data) {
+void process_message(const char *raw_data)
+{
     Message msg;
-    if (parse_message(raw_data, &msg) < 0) return;
-    
+    if (parse_message(raw_data, &msg) < 0)
+        return;
+
     char buffer[BUFFER_SIZE];
-    
-    switch (msg.type) {
-        case MSG_RESPONSE_SUCCESS:
-        case MSG_SUCCESS:
-            if (!is_logged_in) {
-                if (strstr(msg.content, "Login successful")) {
-                    is_logged_in = true;
-                    
-                    // Switch to chat screen
-                    SwitchViewData *view_data = g_malloc(sizeof(SwitchViewData));
-                    view_data->switch_to_chat = true;
-                    g_idle_add(switch_view_idle, view_data);
-                    
-                    show_info_dialog("Login successful!");
-                    send_request(MSG_GET_ONLINE_USERS, "", "");
-                } else if (strstr(msg.content, "Registration successful")) {
-                    show_info_dialog("Registration successful! Please log in.");
-                }
-            } else {
-                g_idle_add(append_chat_idle, g_strdup_printf("[INFO] %s\n", msg.content));
-            }
-            break;
-            
-        case MSG_PRIVATE_MESSAGE:
-            snprintf(buffer, sizeof(buffer), "[%s]: %s\n", msg.from, msg.content);
-            append_to_chat_tab(msg.from, buffer);
-            // Lưu tin nhắn vào lịch sử
-            save_message_to_history(msg.from, current_username, msg.content, NULL);
-            break;
-            
-        case MSG_GROUP_MESSAGE:
-            snprintf(buffer, sizeof(buffer), "[%s]: %s\n", msg.from, msg.content);
-            append_to_chat_tab(msg.extra, buffer);  // msg.extra = group_name
-            // Lưu tin nhắn nhóm vào lịch sử
-            save_message_to_history(msg.from, "", msg.content, msg.extra);
-            break;
-            
-        case MSG_ONLINE_USERS_LIST:
-            update_user_list(msg.content);
-            break;
-            
-        case MSG_USER_ONLINE:
-            snprintf(buffer, sizeof(buffer), "--- %s is now online ---\n", msg.content);
-            g_idle_add(append_chat_idle, g_strdup(buffer));
-            // Hiển thị thông báo trong tab chat nếu đang chat với user đó
-            append_to_chat_tab(msg.content, buffer);
-            send_request(MSG_GET_ONLINE_USERS, "", "");
-            break;
-            
-        case MSG_USER_OFFLINE:
-            snprintf(buffer, sizeof(buffer), "--- %s is now offline ---\n", msg.content);
-            g_idle_add(append_chat_idle, g_strdup(buffer));
-            // Hiển thị thông báo trong tab chat nếu đang chat với user đó
-            append_to_chat_tab(msg.content, buffer);
-            send_request(MSG_GET_ONLINE_USERS, "", "");
-            break;
-            
-        case MSG_FRIEND_LIST:
-            update_friend_list(msg.content);
-            break;
-            
-        case MSG_GROUP_LIST:
-            update_group_list(msg.content);
-            break;
-            
-        case MSG_RESPONSE_ERROR:
-        case MSG_ERROR:
-            show_error_dialog(msg.content);
-            break;
-            
-        case MSG_NOTIFICATION:
-            // Check if this is available groups notification
-            if (strcmp(msg.extra, "AVAILABLE_GROUPS") == 0) {
-                update_group_list(msg.content);
-            } else {
-                g_idle_add(append_chat_idle, g_strdup_printf("[NOTIFICATION] %s\n", msg.content));
-            }
-            break;
-            
-        case MSG_GROUP_JOIN:
-            snprintf(buffer, sizeof(buffer), "[GROUP] %s joined group %s\n", msg.content, msg.extra);
-            g_idle_add(append_chat_idle, g_strdup(buffer));
-            // Auto refresh groups list
-            send_request(MSG_GET_GROUPS, "", "");
-            break;
-            
-        case MSG_GROUP_LEAVE:
-            snprintf(buffer, sizeof(buffer), "[NHÓM %s] %s\n", msg.extra, msg.content);
-            g_idle_add(append_chat_idle, g_strdup(buffer));
-            // Auto refresh groups list
-            send_request(MSG_GET_GROUPS, "", "");
-            break;
-            
-        case MSG_GROUP_INVITE:
-            snprintf(buffer, sizeof(buffer), "Group invite from %s to join group: %s", msg.from, msg.extra);
-            show_info_dialog(buffer);
-            // Auto accept and join
-            send_request(MSG_GROUP_JOIN, msg.extra, "");
-            break;
-            
-        case MSG_FRIEND_REMOVE:
-            snprintf(buffer, sizeof(buffer), "%s removed you from their friend list", msg.from);
-            show_info_dialog(buffer);
-            send_request(MSG_GET_FRIENDS, "", "");  // Refresh friend list
-            break;
-            
-        case MSG_FRIEND_ACCEPT:
-            snprintf(buffer, sizeof(buffer), "[FRIEND] %s accepted your friend request!", msg.from);
-            g_idle_add(append_chat_idle, g_strdup(buffer));
-            g_idle_add(append_chat_idle, g_strdup("\n"));
-            // Auto refresh friend list
-            send_request(MSG_GET_FRIENDS, "", "");
-            break;
-            
-        case MSG_FRIEND_REJECT:
-            snprintf(buffer, sizeof(buffer), "[FRIEND] %s rejected your friend request", msg.from);
-            g_idle_add(append_chat_idle, g_strdup(buffer));
-            g_idle_add(append_chat_idle, g_strdup("\n"));
-            break;
-            
-        case MSG_FRIEND_REQUEST:
-            snprintf(buffer, sizeof(buffer), "Friend request from: %s", msg.from);
-            show_friend_request_dialog(msg.from);
-            break;
-            
-        case MSG_OFFLINE_SYNC:
-            snprintf(buffer, sizeof(buffer), "[OFFLINE MSG from %s]: %s\n", msg.from, msg.content);
-            g_idle_add(append_chat_idle, g_strdup(buffer));
-            break;
-            
-        case MSG_FILE_SEND:
-            // Incoming file transfer request
+
+    switch (msg.type)
+    {
+    case MSG_RESPONSE_SUCCESS:
+    case MSG_SUCCESS:
+        if (!is_logged_in)
+        {
+            if (strstr(msg.content, "Login successful"))
             {
-                const char *filename = msg.extra;
-                uint32_t file_size = (uint32_t)atoi(msg.content);
-                
-                printf("[FILE] Receiving file '%s' (%u bytes) from '%s'\n", 
-                       filename, file_size, msg.from);
-                
-                // Receive file data immediately (in background thread)
-                char *file_buffer = malloc(file_size);
-                if (file_buffer != NULL) {
-                    uint32_t total_received = 0;
-                    while (total_received < file_size) {
-                        int bytes = recv(client_socket, file_buffer + total_received,
-                                       file_size - total_received, 0);
-                        if (bytes <= 0) {
-                            printf("[FILE] Failed to receive file data\n");
-                            free(file_buffer);
-                            file_buffer = NULL;
-                            break;
-                        }
-                        total_received += bytes;
+                is_logged_in = true;
+
+                // Switch to chat screen
+                SwitchViewData *view_data = g_malloc(sizeof(SwitchViewData));
+                view_data->switch_to_chat = true;
+                g_idle_add(switch_view_idle, view_data);
+
+                show_info_dialog("Login successful!");
+                send_request(MSG_GET_ONLINE_USERS, "", "");
+            }
+            else if (strstr(msg.content, "Registration successful"))
+            {
+                show_info_dialog("Registration successful! Please log in.");
+            }
+        }
+        else
+        {
+            g_idle_add(append_chat_idle, g_strdup_printf("[INFO] %s\n", msg.content));
+        }
+        break;
+
+    case MSG_PRIVATE_MESSAGE:
+        snprintf(buffer, sizeof(buffer), "[%s]: %s\n", msg.from, msg.content);
+        append_to_chat_tab(msg.from, buffer);
+        // Lưu tin nhắn vào lịch sử
+        save_message_to_history(msg.from, current_username, msg.content, NULL);
+        break;
+
+    case MSG_GROUP_MESSAGE:
+        snprintf(buffer, sizeof(buffer), "[%s]: %s\n", msg.from, msg.content);
+        append_to_chat_tab(msg.extra, buffer); // msg.extra = group_name
+        // Lưu tin nhắn nhóm vào lịch sử
+        save_message_to_history(msg.from, "", msg.content, msg.extra);
+        break;
+
+    case MSG_ONLINE_USERS_LIST:
+        update_user_list(msg.content);
+        break;
+
+    case MSG_USER_ONLINE:
+        snprintf(buffer, sizeof(buffer), "--- %s is now online ---\n", msg.content);
+        g_idle_add(append_chat_idle, g_strdup(buffer));
+        // Hiển thị thông báo trong tab chat nếu đang chat với user đó
+        append_to_chat_tab(msg.content, buffer);
+        send_request(MSG_GET_ONLINE_USERS, "", "");
+        break;
+
+    case MSG_USER_OFFLINE:
+        snprintf(buffer, sizeof(buffer), "--- %s is now offline ---\n", msg.content);
+        g_idle_add(append_chat_idle, g_strdup(buffer));
+        // Hiển thị thông báo trong tab chat nếu đang chat với user đó
+        append_to_chat_tab(msg.content, buffer);
+        send_request(MSG_GET_ONLINE_USERS, "", "");
+        break;
+    case MSG_FRIEND_REMOVE:
+    {
+        // msg.from = người xóa mình
+        RemoveFriendUIData *d = g_malloc(sizeof(RemoveFriendUIData));
+        strncpy(d->username, msg.from, MAX_USERNAME_LEN - 1);
+        d->username[MAX_USERNAME_LEN - 1] = '\0';
+        
+        
+        show_info_dialog(msg.content); // optional
+           send_request(MSG_GET_FRIENDS, "", "");
+        break;
+    }
+
+    case MSG_FRIEND_LIST:
+        update_friend_list(msg.content);
+        break;
+
+    case MSG_GROUP_LIST:
+        update_group_list(msg.content);
+        break;
+
+    case MSG_RESPONSE_ERROR:
+    case MSG_ERROR:
+        show_error_dialog(msg.content);
+        break;
+
+    case MSG_NOTIFICATION:
+        // Check if this is available groups notification
+        if (strcmp(msg.extra, "AVAILABLE_GROUPS") == 0)
+        {
+            update_group_list(msg.content);
+        }
+        else
+        {
+            g_idle_add(append_chat_idle, g_strdup_printf("[NOTIFICATION] %s\n", msg.content));
+        }
+        break;
+
+    case MSG_GROUP_JOIN:
+        snprintf(buffer, sizeof(buffer), "[GROUP] %s joined group %s\n", msg.content, msg.extra);
+        g_idle_add(append_chat_idle, g_strdup(buffer));
+        // Auto refresh groups list
+        send_request(MSG_GET_GROUPS, "", "");
+        break;
+
+    case MSG_GROUP_LEAVE:
+        snprintf(buffer, sizeof(buffer), "[NHÓM %s] %s\n", msg.extra, msg.content);
+        g_idle_add(append_chat_idle, g_strdup(buffer));
+        // Auto refresh groups list
+        send_request(MSG_GET_GROUPS, "", "");
+        break;
+
+    case MSG_GROUP_INVITE:
+        snprintf(buffer, sizeof(buffer), "Group invite from %s to join group: %s", msg.from, msg.extra);
+        show_info_dialog(buffer);
+        // Auto accept and join
+        send_request(MSG_GROUP_JOIN, msg.extra, "");
+        break;
+
+    case MSG_FRIEND_ACCEPT:
+        snprintf(buffer, sizeof(buffer), "[FRIEND] %s accepted your friend request!", msg.from);
+        g_idle_add(append_chat_idle, g_strdup(buffer));
+        g_idle_add(append_chat_idle, g_strdup("\n"));
+        // Auto refresh friend list
+        send_request(MSG_GET_FRIENDS, "", "");
+        break;
+
+    case MSG_FRIEND_REJECT:
+        snprintf(buffer, sizeof(buffer), "[FRIEND] %s rejected your friend request", msg.from);
+        g_idle_add(append_chat_idle, g_strdup(buffer));
+        g_idle_add(append_chat_idle, g_strdup("\n"));
+        break;
+
+    case MSG_FRIEND_REQUEST:
+        snprintf(buffer, sizeof(buffer), "Friend request from: %s", msg.from);
+        show_friend_request_dialog(msg.from);
+        break;
+
+    case MSG_OFFLINE_SYNC:
+        snprintf(buffer, sizeof(buffer), "[OFFLINE MSG from %s]: %s\n", msg.from, msg.content);
+        g_idle_add(append_chat_idle, g_strdup(buffer));
+        break;
+
+    case MSG_FILE_SEND:
+        // Incoming file transfer request
+        {
+            const char *filename = msg.extra;
+            uint32_t file_size = (uint32_t)atoi(msg.content);
+
+            printf("[FILE] Receiving file '%s' (%u bytes) from '%s'\n",
+                   filename, file_size, msg.from);
+
+            // Receive file data immediately (in background thread)
+            char *file_buffer = malloc(file_size);
+            if (file_buffer != NULL)
+            {
+                uint32_t total_received = 0;
+                while (total_received < file_size)
+                {
+                    int bytes = recv(client_socket, file_buffer + total_received,
+                                     file_size - total_received, 0);
+                    if (bytes <= 0)
+                    {
+                        printf("[FILE] Failed to receive file data\n");
+                        free(file_buffer);
+                        file_buffer = NULL;
+                        break;
                     }
-                    
-                    if (file_buffer != NULL) {
-                        printf("[FILE] Received %u bytes, showing dialog\n", total_received);
-                        // Show dialog with already-received file data
-                        show_file_receive_dialog(msg.from, filename, file_size, file_buffer);
-                    }
-                } else {
-                    printf("[FILE] Failed to allocate memory for file\n");
+                    total_received += bytes;
+                }
+
+                if (file_buffer != NULL)
+                {
+                    printf("[FILE] Received %u bytes, showing dialog\n", total_received);
+                    // Show dialog with already-received file data
+                    show_file_receive_dialog(msg.from, filename, file_size, file_buffer);
                 }
             }
-            break;
-            
-        case MSG_FILE_ACCEPT:
-            snprintf(buffer, sizeof(buffer), "[FILE] %s accepted your file\n", msg.from);
-            append_to_chat_tab(msg.from, buffer);
-            break;
-            
-        case MSG_FILE_REJECT:
-            snprintf(buffer, sizeof(buffer), "[FILE] %s rejected your file\n", msg.from);
-            append_to_chat_tab(msg.from, buffer);
-            break;
-            
-        default:
-            break;
+            else
+            {
+                printf("[FILE] Failed to allocate memory for file\n");
+            }
+        }
+        break;
+
+    case MSG_FILE_ACCEPT:
+        snprintf(buffer, sizeof(buffer), "[FILE] %s accepted your file\n", msg.from);
+        append_to_chat_tab(msg.from, buffer);
+        break;
+
+    case MSG_FILE_REJECT:
+        snprintf(buffer, sizeof(buffer), "[FILE] %s rejected your file\n", msg.from);
+        append_to_chat_tab(msg.from, buffer);
+        break;
+
+    default:
+        break;
     }
 }
 
@@ -1073,44 +1270,51 @@ void process_message(const char *raw_data) {
 // RECEIVE THREAD
 // ===========================
 
-void *receive_thread(void *arg) {
+void *receive_thread(void *arg)
+{
     (void)arg;
     char buffer[BUFFER_SIZE];
-    
-    while (is_running) {
+
+    while (is_running)
+    {
         int bytes = recv_packet(buffer, sizeof(buffer));
-        
-        if (bytes <= 0) {
-            if (is_running) {
+
+        if (bytes <= 0)
+        {
+            if (is_running)
+            {
                 g_idle_add(append_chat_idle, g_strdup("--- Disconnected from server ---"));
             }
             break;
         }
-        
+
         process_message(buffer);
     }
-    
+
     return NULL;
 }
 
-bool connect_to_server(const char *ip, int port) {
+bool connect_to_server(const char *ip, int port)
+{
     client_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (client_socket < 0) return false;
-    
+    if (client_socket < 0)
+        return false;
+
     struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
     server_addr.sin_addr.s_addr = inet_addr(ip);
-    
-    if (connect(client_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+
+    if (connect(client_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
         close(client_socket);
         client_socket = -1;
         return false;
     }
-    
+
     pthread_create(&recv_thread_id, NULL, receive_thread, NULL);
     pthread_detach(recv_thread_id);
-    
+
     return true;
 }
 
@@ -1118,147 +1322,169 @@ bool connect_to_server(const char *ip, int port) {
 // CALLBACK FUNCTIONS
 // ===========================
 
-void on_btn_login_clicked(GtkWidget *widget, gpointer data) {
+void on_btn_login_clicked(GtkWidget *widget, gpointer data)
+{
     (void)widget;
     (void)data;
-    
+
     const char *ip = gtk_entry_get_text(GTK_ENTRY(entry_host));
     const char *port_str = gtk_entry_get_text(GTK_ENTRY(entry_port));
     const char *username = gtk_entry_get_text(GTK_ENTRY(entry_username));
     const char *password = gtk_entry_get_text(GTK_ENTRY(entry_password));
-    
-    if (strlen(username) == 0 || strlen(password) == 0) {
+
+    if (strlen(username) == 0 || strlen(password) == 0)
+    {
         show_error_dialog("Please enter username and password!");
         return;
     }
-    
+
     int port = atoi(port_str);
-    if (port <= 0 || port > 65535) {
+    if (port <= 0 || port > 65535)
+    {
         show_error_dialog("Invalid port number!");
         return;
     }
-    
-    if (client_socket < 0) {
-        if (!connect_to_server(ip, port)) {
+
+    if (client_socket < 0)
+    {
+        if (!connect_to_server(ip, port))
+        {
             show_error_dialog("Cannot connect to server!\nCheck IP/Port and ensure server is running.");
             return;
         }
     }
-    
+
     strncpy(current_username, username, MAX_USERNAME_LEN - 1);
-    
+
     char content[256];
     snprintf(content, sizeof(content), "%s|%s", username, password);
     send_request(MSG_LOGIN, content, "");
-    
+
     // Clear password after sending
     gtk_entry_set_text(GTK_ENTRY(entry_password), "");
 }
 
-void on_btn_register_clicked(GtkWidget *widget, gpointer data) {
+void on_btn_register_clicked(GtkWidget *widget, gpointer data)
+{
     (void)widget;
     (void)data;
-    
+
     const char *ip = gtk_entry_get_text(GTK_ENTRY(entry_host));
     const char *port_str = gtk_entry_get_text(GTK_ENTRY(entry_port));
     const char *username = gtk_entry_get_text(GTK_ENTRY(entry_username));
     const char *password = gtk_entry_get_text(GTK_ENTRY(entry_password));
-    
-    if (strlen(username) == 0 || strlen(password) == 0) {
+
+    if (strlen(username) == 0 || strlen(password) == 0)
+    {
         show_error_dialog("Please enter username and password!");
         return;
     }
-    
+
     int port = atoi(port_str);
-    if (port <= 0 || port > 65535) {
+    if (port <= 0 || port > 65535)
+    {
         show_error_dialog("Invalid port number!");
         return;
     }
-    
-    if (client_socket < 0) {
-        if (!connect_to_server(ip, port)) {
+
+    if (client_socket < 0)
+    {
+        if (!connect_to_server(ip, port))
+        {
             show_error_dialog("Cannot connect to server!\nCheck IP/Port and ensure server is running.");
             return;
         }
     }
-    
+
     char content[256];
     snprintf(content, sizeof(content), "%s|%s", username, password);
     send_request(MSG_REGISTER, content, "");
-    
+
     // Clear password after sending
     gtk_entry_set_text(GTK_ENTRY(entry_password), "");
 }
 
-void on_btn_send_clicked(GtkWidget *widget, gpointer data) {
+void on_btn_send_clicked(GtkWidget *widget, gpointer data)
+{
     (void)widget;
     (void)data;
-    
+
     // Get current active chat tab
     int current_page = gtk_notebook_get_current_page(GTK_NOTEBOOK(chat_notebook));
-    if (current_page < 0) {
+    if (current_page < 0)
+    {
         show_error_dialog("Please select a chat!");
         return;
     }
-    
+
     // Lấy vbox của page hiện tại
     GtkWidget *current_vbox = gtk_notebook_get_nth_page(GTK_NOTEBOOK(chat_notebook), current_page);
-    
+
     // Tìm ChatTab tương ứng
     ChatTab *tab = NULL;
-    for (int i = 0; i < chat_tab_count; i++) {
-        if (chat_tabs[i].vbox == current_vbox && chat_tabs[i].is_visible) {
+    for (int i = 0; i < chat_tab_count; i++)
+    {
+        if (chat_tabs[i].vbox == current_vbox && chat_tabs[i].is_visible)
+        {
             tab = &chat_tabs[i];
             break;
         }
     }
-    
-    if (!tab) {
+
+    if (!tab)
+    {
         show_error_dialog("Invalid chat tab!");
         return;
     }
-    
+
     const char *message = gtk_entry_get_text(GTK_ENTRY(entry_message));
-    if (strlen(message) == 0) return;
-    
-    if (tab->is_group) {
+    if (strlen(message) == 0)
+        return;
+
+    if (tab->is_group)
+    {
         send_request(MSG_GROUP_MESSAGE, message, tab->name);
         // Lưu tin nhắn nhóm đã gửi
         save_message_to_history(current_username, "", message, tab->name);
-    } else {
+    }
+    else
+    {
         send_request(MSG_PRIVATE_MESSAGE, message, tab->name);
         // Lưu tin nhắn riêng tư đã gửi
         save_message_to_history(current_username, tab->name, message, NULL);
     }
-    
+
     char display[BUFFER_SIZE];
     snprintf(display, sizeof(display), "Me: %s\n", message);
     append_to_chat_tab(tab->name, display);
-    
+
     gtk_entry_set_text(GTK_ENTRY(entry_message), "");
 }
 
-void on_entry_message_activate(GtkWidget *widget, gpointer data) {
+void on_entry_message_activate(GtkWidget *widget, gpointer data)
+{
     on_btn_send_clicked(widget, data);
 }
 
-void on_user_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
+void on_user_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data)
+{
     (void)box;
     (void)data;
-    
+
     GtkWidget *label = gtk_bin_get_child(GTK_BIN(row));
     const char *username = gtk_label_get_text(GTK_LABEL(label));
-    
+
     open_chat_tab(username, false);
 }
 
-void on_friend_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
+void on_friend_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data)
+{
     (void)box;
     (void)data;
-    
+
     GtkWidget *label = gtk_bin_get_child(GTK_BIN(row));
     const char *username = gtk_label_get_text(GTK_LABEL(label));
-    
+
     GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
                                                GTK_DIALOG_DESTROY_WITH_PARENT,
                                                GTK_MESSAGE_QUESTION,
@@ -1267,26 +1493,41 @@ void on_friend_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data)
     gtk_dialog_add_button(GTK_DIALOG(dialog), "Chat", 1);
     gtk_dialog_add_button(GTK_DIALOG(dialog), "Remove Friend", 2);
     gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL);
-    
+
     int response = gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
-    
-    if (response == 1) {
+
+    if (response == 1)
+    {
         open_chat_tab(username, false);
-    } else if (response == 2) {
-        send_request(MSG_FRIEND_REMOVE, "", username);
-        show_info_dialog("Friend removed!");
-        send_request(MSG_GET_FRIENDS, "", "");
+    }
+    else if (response == 2)
+    {
+        GtkWidget *confirm = gtk_message_dialog_new(
+            GTK_WINDOW(window),
+            GTK_DIALOG_DESTROY_WITH_PARENT,
+            GTK_MESSAGE_WARNING,
+            GTK_BUTTONS_YES_NO,
+            "Are you sure you want to remove %s?", username);
+
+        int confirm_resp = gtk_dialog_run(GTK_DIALOG(confirm));
+        gtk_widget_destroy(confirm);
+
+        if (confirm_resp == GTK_RESPONSE_YES)
+        {
+            send_request(MSG_FRIEND_REMOVE, "", username);
+        }
     }
 }
 
-void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) {
+void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data)
+{
     (void)box;
     (void)data;
-    
+
     GtkWidget *label = gtk_bin_get_child(GTK_BIN(row));
     const char *group_name = gtk_label_get_text(GTK_LABEL(label));
-    
+
     GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
                                                GTK_DIALOG_DESTROY_WITH_PARENT,
                                                GTK_MESSAGE_QUESTION,
@@ -1296,95 +1537,108 @@ void on_group_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data) 
     gtk_dialog_add_button(GTK_DIALOG(dialog), "Chat in Group", 2);
     gtk_dialog_add_button(GTK_DIALOG(dialog), "Leave Group", 3);
     gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL);
-    
+
     int response = gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
-    
-    if (response == 1) {
+
+    if (response == 1)
+    {
         Message msg;
         create_response_message(&msg, MSG_GROUP_JOIN, current_username, "", "");
         strncpy(msg.extra, group_name, sizeof(msg.extra) - 1);
-        
+
         char buffer[BUFFER_SIZE];
         int len = serialize_message(&msg, buffer, sizeof(buffer));
-        if (len > 0) {
+        if (len > 0)
+        {
             send_packet(buffer, len);
         }
         show_info_dialog("Join request sent!");
-    } else if (response == 2) {
+    }
+    else if (response == 2)
+    {
         open_chat_tab(group_name, true);
-    } else if (response == 3) {
+    }
+    else if (response == 3)
+    {
         Message msg;
         create_response_message(&msg, MSG_GROUP_LEAVE, current_username, "", "");
         strncpy(msg.extra, group_name, sizeof(msg.extra) - 1);
-        
+
         char buffer[BUFFER_SIZE];
         int len = serialize_message(&msg, buffer, sizeof(buffer));
-        if (len > 0) {
+        if (len > 0)
+        {
             send_packet(buffer, len);
         }
         show_info_dialog("Left group!");
-        send_request(MSG_GET_GROUPS, "", "");  // Refresh group list
+        send_request(MSG_GET_GROUPS, "", ""); // Refresh group list
     }
 }
 
-void on_btn_add_friend_clicked(GtkWidget *widget, gpointer data) {
+void on_btn_add_friend_clicked(GtkWidget *widget, gpointer data)
+{
     (void)widget;
     (void)data;
-    
+
     const char *username = gtk_entry_get_text(GTK_ENTRY(entry_friend_username));
-    if (strlen(username) == 0) {
+    if (strlen(username) == 0)
+    {
         show_error_dialog("Please enter a username!");
         return;
     }
-    
+
     send_request(MSG_FRIEND_REQUEST, "", username);
     gtk_entry_set_text(GTK_ENTRY(entry_friend_username), "");
 }
 
-void on_btn_create_group_clicked(GtkWidget *widget, gpointer data) {
+void on_btn_create_group_clicked(GtkWidget *widget, gpointer data)
+{
     (void)widget;
     (void)data;
-    
+
     const char *group_name = gtk_entry_get_text(GTK_ENTRY(entry_group_name));
-    if (strlen(group_name) == 0) {
+    if (strlen(group_name) == 0)
+    {
         show_error_dialog("Please enter a group name!");
         return;
     }
-    
+
     // Tạo dialog để chọn ít nhất 2 bạn bè
     GtkWidget *dialog = gtk_dialog_new_with_buttons("Select Friends for Group",
-                                                     GTK_WINDOW(window),
-                                                     GTK_DIALOG_MODAL,
-                                                     "Create", GTK_RESPONSE_OK,
-                                                     "Cancel", GTK_RESPONSE_CANCEL,
-                                                     NULL);
-    
+                                                    GTK_WINDOW(window),
+                                                    GTK_DIALOG_MODAL,
+                                                    "Create", GTK_RESPONSE_OK,
+                                                    "Cancel", GTK_RESPONSE_CANCEL,
+                                                    NULL);
+
     GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
     gtk_container_set_border_width(GTK_CONTAINER(content_area), 10);
-    
+
     GtkWidget *label = gtk_label_new("Select at least 2 friends to create a group:");
     gtk_box_pack_start(GTK_BOX(content_area), label, FALSE, FALSE, 10);
-    
+
     // Tạo scrolled window cho danh sách checkboxes
     GtkWidget *scrolled = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), 
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_widget_set_size_request(scrolled, 300, 200);
-    
+
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_container_add(GTK_CONTAINER(scrolled), vbox);
     gtk_box_pack_start(GTK_BOX(content_area), scrolled, TRUE, TRUE, 10);
-    
+
     // Tìm danh sách bạn bè và tạo checkboxes
     GList *children = gtk_container_get_children(GTK_CONTAINER(listbox_friends));
     int friend_count = 0;
     GSList *checkbox_list = NULL;
-    
-    for (GList *iter = children; iter != NULL; iter = g_list_next(iter)) {
+
+    for (GList *iter = children; iter != NULL; iter = g_list_next(iter))
+    {
         GtkWidget *row = GTK_WIDGET(iter->data);
         GtkWidget *label_widget = gtk_bin_get_child(GTK_BIN(row));
-        if (label_widget) {
+        if (label_widget)
+        {
             const char *friend_name = gtk_label_get_text(GTK_LABEL(label_widget));
             GtkWidget *checkbox = gtk_check_button_new_with_label(friend_name);
             gtk_box_pack_start(GTK_BOX(vbox), checkbox, FALSE, FALSE, 2);
@@ -1393,111 +1647,128 @@ void on_btn_create_group_clicked(GtkWidget *widget, gpointer data) {
         }
     }
     g_list_free(children);
-    
-    if (friend_count < 2) {
+
+    if (friend_count < 2)
+    {
         gtk_widget_destroy(dialog);
         g_slist_free(checkbox_list);
         show_error_dialog("You need at least 2 friends to create a group!");
         return;
     }
-    
+
     gtk_widget_show_all(dialog);
-    
+
     int response = gtk_dialog_run(GTK_DIALOG(dialog));
-    
-    if (response == GTK_RESPONSE_OK) {
+
+    if (response == GTK_RESPONSE_OK)
+    {
         // Đếm số bạn bè được chọn và tạo danh sách
         char selected_friends[BUFFER_SIZE] = "";
         int selected_count = 0;
-        
-        for (GSList *iter = checkbox_list; iter != NULL; iter = g_slist_next(iter)) {
+
+        for (GSList *iter = checkbox_list; iter != NULL; iter = g_slist_next(iter))
+        {
             GtkWidget *checkbox = GTK_WIDGET(iter->data);
-            if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(checkbox))) {
+            if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(checkbox)))
+            {
                 const char *friend_name = gtk_button_get_label(GTK_BUTTON(checkbox));
-                if (selected_count > 0) {
+                if (selected_count > 0)
+                {
                     strcat(selected_friends, ",");
                 }
                 strcat(selected_friends, friend_name);
                 selected_count++;
             }
         }
-        
-        if (selected_count < 2) {
+
+        if (selected_count < 2)
+        {
             show_error_dialog("Please select at least 2 friends!");
-        } else {
+        }
+        else
+        {
             // Gửi request với danh sách bạn bè
             Message msg;
             create_response_message(&msg, MSG_GROUP_CREATE, current_username, "", group_name);
-            
+
             // msg.extra = friend1,friend2,friend3,...
             strncpy(msg.extra, selected_friends, sizeof(msg.extra) - 1);
-            
+
             char buffer[BUFFER_SIZE];
             int len = serialize_message(&msg, buffer, sizeof(buffer));
-            if (len > 0) {
+            if (len > 0)
+            {
                 send_packet(buffer, len);
                 char success_msg[256];
-                snprintf(success_msg, sizeof(success_msg), 
-                        "Group creation request sent with %d friends!", selected_count);
+                snprintf(success_msg, sizeof(success_msg),
+                         "Group creation request sent with %d friends!", selected_count);
                 show_info_dialog(success_msg);
                 gtk_entry_set_text(GTK_ENTRY(entry_group_name), "");
             }
         }
     }
-    
+
     g_slist_free(checkbox_list);
     gtk_widget_destroy(dialog);
 }
 
-void on_btn_join_group_clicked(GtkWidget *widget, gpointer data) {
+void on_btn_join_group_clicked(GtkWidget *widget, gpointer data)
+{
     (void)widget;
     (void)data;
-    
+
     const char *group_name = gtk_entry_get_text(GTK_ENTRY(entry_join_group_name));
-    if (strlen(group_name) == 0) {
+    if (strlen(group_name) == 0)
+    {
         show_error_dialog("Please enter a group name!");
         return;
     }
-    
+
     // MSG_GROUP_JOIN sử dụng extra field để chứa group name
     Message msg;
     create_response_message(&msg, MSG_GROUP_JOIN, current_username, "", "");
     strncpy(msg.extra, group_name, sizeof(msg.extra) - 1);
-    
+
     char buffer[BUFFER_SIZE];
     int len = serialize_message(&msg, buffer, sizeof(buffer));
-    if (len > 0) {
+    if (len > 0)
+    {
         send_packet(buffer, len);
     }
-    
+
     gtk_entry_set_text(GTK_ENTRY(entry_join_group_name), "");
 }
 
-void on_btn_send_file_clicked(GtkWidget *widget, gpointer data) {
+void on_btn_send_file_clicked(GtkWidget *widget, gpointer data)
+{
     (void)widget;
-    (void)data;  // We'll get recipient from current tab
-    
+    (void)data; // We'll get recipient from current tab
+
     // Get current active tab to determine recipient
     int current_page = gtk_notebook_get_current_page(GTK_NOTEBOOK(chat_notebook));
-    if (current_page < 0) {
+    if (current_page < 0)
+    {
         show_error_dialog("Please select a chat first");
         return;
     }
-    
+
     // Find the recipient from the tab
     const char *recipient = NULL;
-    for (int i = 0; i < chat_tab_count; i++) {
-        if (chat_tabs[i].page_num == current_page && chat_tabs[i].is_visible) {
+    for (int i = 0; i < chat_tab_count; i++)
+    {
+        if (chat_tabs[i].page_num == current_page && chat_tabs[i].is_visible)
+        {
             recipient = chat_tabs[i].name;
             break;
         }
     }
-    
-    if (recipient == NULL || strlen(recipient) == 0) {
+
+    if (recipient == NULL || strlen(recipient) == 0)
+    {
         show_error_dialog("No recipient selected");
         return;
     }
-    
+
     // Open file chooser
     GtkWidget *file_chooser = gtk_file_chooser_dialog_new(
         "Select File to Send",
@@ -1506,143 +1777,163 @@ void on_btn_send_file_clicked(GtkWidget *widget, gpointer data) {
         "Cancel", GTK_RESPONSE_CANCEL,
         "Send", GTK_RESPONSE_ACCEPT,
         NULL);
-    
+
     // Add file size filter (10MB max)
     GtkFileFilter *filter = gtk_file_filter_new();
     gtk_file_filter_set_name(filter, "Files up to 10MB");
     gtk_file_filter_add_pattern(filter, "*");
     gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(file_chooser), filter);
-    
-    if (gtk_dialog_run(GTK_DIALOG(file_chooser)) == GTK_RESPONSE_ACCEPT) {
+
+    if (gtk_dialog_run(GTK_DIALOG(file_chooser)) == GTK_RESPONSE_ACCEPT)
+    {
         char *filepath = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(file_chooser));
-        
+
         // Get file info
         FILE *fp = fopen(filepath, "rb");
-        if (fp == NULL) {
+        if (fp == NULL)
+        {
             show_error_dialog("Failed to open file");
             g_free(filepath);
             gtk_widget_destroy(file_chooser);
             return;
         }
-        
+
         fseek(fp, 0, SEEK_END);
         long file_size = ftell(fp);
         fseek(fp, 0, SEEK_SET);
-        
+
         // Check file size (10MB max)
-        if (file_size > 10 * 1024 * 1024) {
+        if (file_size > 10 * 1024 * 1024)
+        {
             show_error_dialog("File too large (max 10MB)");
             fclose(fp);
             g_free(filepath);
             gtk_widget_destroy(file_chooser);
             return;
         }
-        
+
         // Read file data
         char *file_data = malloc(file_size);
-        if (file_data == NULL) {
+        if (file_data == NULL)
+        {
             show_error_dialog("Memory allocation failed");
             fclose(fp);
             g_free(filepath);
             gtk_widget_destroy(file_chooser);
             return;
         }
-        
+
         size_t read_size = fread(file_data, 1, file_size, fp);
         fclose(fp);
-        
-        if (read_size != (size_t)file_size) {
+
+        if (read_size != (size_t)file_size)
+        {
             show_error_dialog("Failed to read file");
             free(file_data);
             g_free(filepath);
             gtk_widget_destroy(file_chooser);
             return;
         }
-        
+
         // Extract filename
         const char *filename = strrchr(filepath, '/');
-        if (filename == NULL) {
+        if (filename == NULL)
+        {
             filename = filepath;
-        } else {
-            filename++;  // Skip '/'
         }
-        
+        else
+        {
+            filename++; // Skip '/'
+        }
+
         // Send file transfer message
         Message msg;
         create_response_message(&msg, MSG_FILE_SEND, current_username, recipient, "");
         snprintf(msg.content, sizeof(msg.content), "%ld", file_size);
         strncpy(msg.extra, filename, MAX_MESSAGE_LEN - 1);
         msg.extra[MAX_MESSAGE_LEN - 1] = '\0';
-        
+
         char buffer[BUFFER_SIZE];
         int len = serialize_message(&msg, buffer, sizeof(buffer));
-        if (len > 0) {
+        if (len > 0)
+        {
             // Send message header
-            if (send_packet(buffer, len) > 0) {
+            if (send_packet(buffer, len) > 0)
+            {
                 // Send file data
                 int total_sent = 0;
-                while (total_sent < file_size) {
+                while (total_sent < file_size)
+                {
                     int bytes = send(client_socket, file_data + total_sent,
-                                   file_size - total_sent, 0);
-                    if (bytes <= 0) {
+                                     file_size - total_sent, 0);
+                    if (bytes <= 0)
+                    {
                         show_error_dialog("Failed to send file data");
                         break;
                     }
                     total_sent += bytes;
                 }
-                
-                if (total_sent == file_size) {
+
+                if (total_sent == file_size)
+                {
                     char success_msg[BUFFER_SIZE];
                     snprintf(success_msg, sizeof(success_msg),
                              "[FILE] Sent '%s' to %s (%.2f KB)\n",
                              filename, recipient, file_size / 1024.0);
                     append_to_chat_tab(recipient, success_msg);
                 }
-            } else {
+            }
+            else
+            {
                 show_error_dialog("Failed to send file message");
             }
         }
-        
+
         free(file_data);
         g_free(filepath);
     }
-    
+
     gtk_widget_destroy(file_chooser);
 }
 
-void on_window_destroy(GtkWidget *widget, gpointer data) {
+void on_window_destroy(GtkWidget *widget, gpointer data)
+{
     (void)widget;
     (void)data;
-    
+
     is_running = false;
-    
-    if (is_logged_in && client_socket >= 0) {
+
+    if (is_logged_in && client_socket >= 0)
+    {
         send_request(MSG_LOGOUT, "", "");
         usleep(100000); // 100ms
     }
-    
-    if (client_socket >= 0) {
+
+    if (client_socket >= 0)
+    {
         close(client_socket);
     }
-    
+
     gtk_main_quit();
 }
 
-void on_notebook_switch_page(GtkNotebook *notebook, GtkWidget *page, guint page_num, gpointer data) {
+void on_notebook_switch_page(GtkNotebook *notebook, GtkWidget *page, guint page_num, gpointer data)
+{
     (void)notebook;
     (void)page;
     (void)data;
-    
-    switch (page_num) {
-        case 0: // Online users
-            send_request(MSG_GET_ONLINE_USERS, "", "");
-            break;
-        case 1: // Friends
-            send_request(MSG_GET_FRIENDS, "", "");
-            break;
-        case 2: // Groups
-            send_request(MSG_GET_GROUPS, "", "");
-            break;
+
+    switch (page_num)
+    {
+    case 0: // Online users
+        send_request(MSG_GET_ONLINE_USERS, "", "");
+        break;
+    case 1: // Friends
+        send_request(MSG_GET_FRIENDS, "", "");
+        break;
+    case 2: // Groups
+        send_request(MSG_GET_GROUPS, "", "");
+        break;
     }
 }
 
@@ -1650,22 +1941,23 @@ void on_notebook_switch_page(GtkNotebook *notebook, GtkWidget *page, guint page_
 // GUI CREATION
 // ===========================
 
-void create_login_screen() {
+void create_login_screen()
+{
     login_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_set_halign(login_box, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(login_box, GTK_ALIGN_CENTER);
     gtk_container_set_border_width(GTK_CONTAINER(login_box), 20);
-    
+
     // Title
     GtkWidget *title = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(title), "<span font='20'><b>ChatOnline Client</b></span>");
     gtk_box_pack_start(GTK_BOX(login_box), title, FALSE, FALSE, 20);
-    
+
     // Grid for form
     GtkWidget *grid = gtk_grid_new();
     gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
     gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
-    
+
     // Host
     GtkWidget *label_host = gtk_label_new("Host IP:");
     gtk_widget_set_halign(label_host, GTK_ALIGN_END);
@@ -1674,7 +1966,7 @@ void create_login_screen() {
     gtk_entry_set_width_chars(GTK_ENTRY(entry_host), 20);
     gtk_grid_attach(GTK_GRID(grid), label_host, 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_host, 1, 0, 1, 1);
-    
+
     // Port
     GtkWidget *label_port = gtk_label_new("Port:");
     gtk_widget_set_halign(label_port, GTK_ALIGN_END);
@@ -1683,7 +1975,7 @@ void create_login_screen() {
     gtk_entry_set_width_chars(GTK_ENTRY(entry_port), 20);
     gtk_grid_attach(GTK_GRID(grid), label_port, 0, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_port, 1, 1, 1, 1);
-    
+
     // Username
     GtkWidget *label_user = gtk_label_new("Username:");
     gtk_widget_set_halign(label_user, GTK_ALIGN_END);
@@ -1691,7 +1983,7 @@ void create_login_screen() {
     gtk_entry_set_width_chars(GTK_ENTRY(entry_username), 20);
     gtk_grid_attach(GTK_GRID(grid), label_user, 0, 2, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_username, 1, 2, 1, 1);
-    
+
     // Password
     GtkWidget *label_pass = gtk_label_new("Password:");
     gtk_widget_set_halign(label_pass, GTK_ALIGN_END);
@@ -1700,40 +1992,41 @@ void create_login_screen() {
     gtk_entry_set_width_chars(GTK_ENTRY(entry_password), 20);
     gtk_grid_attach(GTK_GRID(grid), label_pass, 0, 3, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_password, 1, 3, 1, 1);
-    
+
     gtk_box_pack_start(GTK_BOX(login_box), grid, FALSE, FALSE, 10);
-    
+
     // Buttons
     GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_widget_set_halign(button_box, GTK_ALIGN_CENTER);
-    
+
     btn_login = gtk_button_new_with_label("LOGIN");
     gtk_widget_set_size_request(btn_login, 100, 35);
     g_signal_connect(btn_login, "clicked", G_CALLBACK(on_btn_login_clicked), NULL);
     gtk_box_pack_start(GTK_BOX(button_box), btn_login, FALSE, FALSE, 0);
-    
+
     btn_register = gtk_button_new_with_label("REGISTER");
     gtk_widget_set_size_request(btn_register, 100, 35);
     g_signal_connect(btn_register, "clicked", G_CALLBACK(on_btn_register_clicked), NULL);
     gtk_box_pack_start(GTK_BOX(button_box), btn_register, FALSE, FALSE, 0);
-    
+
     gtk_box_pack_start(GTK_BOX(login_box), button_box, FALSE, FALSE, 20);
-    
+
     gtk_stack_add_named(GTK_STACK(main_stack), login_box, "login");
 }
 
-void create_chat_screen() {
+void create_chat_screen()
+{
     chat_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    
+
     // Left panel with tabs
     GtkWidget *left_panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_widget_set_size_request(left_panel, 250, -1);
     gtk_container_set_border_width(GTK_CONTAINER(left_panel), 5);
-    
+
     // Notebook with tabs
     notebook_tabs = gtk_notebook_new();
     g_signal_connect(notebook_tabs, "switch-page", G_CALLBACK(on_notebook_switch_page), NULL);
-    
+
     // Online users tab
     GtkWidget *scroll_users = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_users),
@@ -1742,7 +2035,7 @@ void create_chat_screen() {
     g_signal_connect(listbox_users, "row-activated", G_CALLBACK(on_user_row_activated), NULL);
     gtk_container_add(GTK_CONTAINER(scroll_users), listbox_users);
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook_tabs), scroll_users, gtk_label_new("Online"));
-    
+
     // Friends tab
     GtkWidget *friends_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     GtkWidget *scroll_friends = gtk_scrolled_window_new(NULL, NULL);
@@ -1750,7 +2043,7 @@ void create_chat_screen() {
     g_signal_connect(listbox_friends, "row-activated", G_CALLBACK(on_friend_row_activated), NULL);
     gtk_container_add(GTK_CONTAINER(scroll_friends), listbox_friends);
     gtk_box_pack_start(GTK_BOX(friends_box), scroll_friends, TRUE, TRUE, 0);
-    
+
     // Add friend section
     GtkWidget *add_friend_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     entry_friend_username = gtk_entry_new();
@@ -1760,9 +2053,9 @@ void create_chat_screen() {
     gtk_box_pack_start(GTK_BOX(add_friend_box), entry_friend_username, TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(add_friend_box), btn_add_friend, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(friends_box), add_friend_box, FALSE, FALSE, 0);
-    
+
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook_tabs), friends_box, gtk_label_new("Friends"));
-    
+
     // Groups tab
     GtkWidget *groups_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     GtkWidget *scroll_groups = gtk_scrolled_window_new(NULL, NULL);
@@ -1770,7 +2063,7 @@ void create_chat_screen() {
     g_signal_connect(listbox_groups, "row-activated", G_CALLBACK(on_group_row_activated), NULL);
     gtk_container_add(GTK_CONTAINER(scroll_groups), listbox_groups);
     gtk_box_pack_start(GTK_BOX(groups_box), scroll_groups, TRUE, TRUE, 0);
-    
+
     // Create group section
     GtkWidget *create_group_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     entry_group_name = gtk_entry_new();
@@ -1780,7 +2073,7 @@ void create_chat_screen() {
     gtk_box_pack_start(GTK_BOX(create_group_box), entry_group_name, TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(create_group_box), btn_create_group, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(groups_box), create_group_box, FALSE, FALSE, 0);
-    
+
     // Join group section
     GtkWidget *join_group_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     entry_join_group_name = gtk_entry_new();
@@ -1790,41 +2083,41 @@ void create_chat_screen() {
     gtk_box_pack_start(GTK_BOX(join_group_box), entry_join_group_name, TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(join_group_box), btn_join_group, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(groups_box), join_group_box, FALSE, FALSE, 0);
-    
+
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook_tabs), groups_box, gtk_label_new("Groups"));
-    
+
     gtk_box_pack_start(GTK_BOX(left_panel), notebook_tabs, TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(chat_box), left_panel, FALSE, FALSE, 0);
-    
+
     // Right panel - chat area with notebook for multiple chats
     GtkWidget *right_panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_container_set_border_width(GTK_CONTAINER(right_panel), 5);
-    
+
     // Chat notebook for multiple conversations
     chat_notebook = gtk_notebook_new();
     gtk_notebook_set_tab_pos(GTK_NOTEBOOK(chat_notebook), GTK_POS_TOP);
     gtk_notebook_set_scrollable(GTK_NOTEBOOK(chat_notebook), TRUE);
     gtk_box_pack_start(GTK_BOX(right_panel), chat_notebook, TRUE, TRUE, 0);
-    
+
     // Message input
     GtkWidget *input_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     entry_message = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_message), "Type your message...");
     g_signal_connect(entry_message, "activate", G_CALLBACK(on_entry_message_activate), NULL);
-    
+
     // File send button
     GtkWidget *btn_send_file = gtk_button_new_with_label("📎 File");
     g_signal_connect(btn_send_file, "clicked", G_CALLBACK(on_btn_send_file_clicked), NULL);
-    
+
     btn_send = gtk_button_new_with_label("SEND");
     g_signal_connect(btn_send, "clicked", G_CALLBACK(on_btn_send_clicked), NULL);
     gtk_box_pack_start(GTK_BOX(input_box), entry_message, TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(input_box), btn_send_file, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(input_box), btn_send, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(right_panel), input_box, FALSE, FALSE, 0);
-    
+
     gtk_box_pack_start(GTK_BOX(chat_box), right_panel, TRUE, TRUE, 0);
-    
+
     gtk_stack_add_named(GTK_STACK(main_stack), chat_box, "chat");
 }
 
@@ -1832,36 +2125,38 @@ void create_chat_screen() {
 // MAIN
 // ===========================
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     gtk_init(&argc, &argv);
-    
+
     // Initialize network
-    if (init_network() < 0) {
+    if (init_network() < 0)
+    {
         fprintf(stderr, "Failed to initialize network\n");
         return 1;
     }
-    
+
     // Create window
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window), "ChatOnline - GTK Client");
     gtk_window_set_default_size(GTK_WINDOW(window), 900, 600);
     gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER);
     g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), NULL);
-    
+
     // Create stack for switching between login and chat
     main_stack = gtk_stack_new();
     gtk_container_add(GTK_CONTAINER(window), main_stack);
-    
+
     // Create screens
     create_login_screen();
     create_chat_screen();
-    
+
     // Show login screen first
     gtk_stack_set_visible_child_name(GTK_STACK(main_stack), "login");
-    
+
     gtk_widget_show_all(window);
     gtk_main();
-    
+
     cleanup_network();
     return 0;
 }
