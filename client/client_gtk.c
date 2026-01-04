@@ -18,6 +18,10 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <pwd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include "protocol.h"
 
 // ===========================
@@ -113,15 +117,22 @@ void save_message_to_history(const char *from, const char *to, const char *messa
     if (!is_logged_in || strlen(current_username) == 0)
         return;
 
-    // Tạo tên file lịch sử dựa trên username
-    char filename[512];
-    snprintf(filename, sizeof(filename), "chat_history_%s.txt", current_username);
+    // Tạo thư mục chat_history nếu chưa có (dùng mkdir thay vì system)
+    struct stat st = {0};
+    if (stat("chat_history", &st) == -1) {
+        mkdir("chat_history", 0755);
+    }
+
+    // Tạo tên file lịch sử trong thư mục chat_history
+    char filename[1024];
+    snprintf(filename, sizeof(filename), "chat_history/history_%s.txt", current_username);
 
     // Mở file ở chế độ append
     FILE *file = fopen(filename, "a");
     if (file == NULL)
     {
-        return; // Không in lỗi để không làm gián đoạn chat
+        fprintf(stderr, "Cannot save chat history to %s: %s\n", filename, strerror(errno));
+        return;
     }
 
     // Lấy thời gian hiện tại
@@ -143,6 +154,7 @@ void save_message_to_history(const char *from, const char *to, const char *messa
     }
 
     fclose(file);
+    printf("Saved message to: %s\n", filename);  // Debug
 }
 
 void load_chat_history_to_tab(const char *tab_name, bool is_group)
@@ -150,14 +162,14 @@ void load_chat_history_to_tab(const char *tab_name, bool is_group)
     if (!is_logged_in || strlen(current_username) == 0)
         return;
 
-    char filename[512];
-    snprintf(filename, sizeof(filename), "chat_history_%s.txt", current_username);
+    // Tạo tên file lịch sử trong thư mục chat_history
+    char filename[1024];
+    snprintf(filename, sizeof(filename), "chat_history/history_%s.txt", current_username);
 
     FILE *file = fopen(filename, "r");
     if (file == NULL)
     {
-        // File không tồn tại - chưa có lịch sử
-        return;
+        return; // Không có lịch sử
     }
 
     char line[MAX_MESSAGE_LEN + 256];
