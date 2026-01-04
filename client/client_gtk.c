@@ -22,6 +22,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <libgen.h>
 #include "protocol.h"
 
 // ===========================
@@ -112,20 +113,43 @@ int chat_tab_count = 0;
 // CHAT HISTORY FUNCTIONS
 // ===========================
 
+// Lấy đường dẫn thư mục chứa binary đang chạy
+void get_binary_directory(char *dir_path, size_t size) {
+    char exe_path[1024];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    
+    if (len != -1) {
+        exe_path[len] = '\0';
+        char *dir = dirname(exe_path);
+        snprintf(dir_path, size, "%s", dir);
+    } else {
+        // Fallback: dùng thư mục hiện tại
+        snprintf(dir_path, size, ".");
+    }
+}
+
 void save_message_to_history(const char *from, const char *to, const char *message, const char *group_name)
 {
     if (!is_logged_in || strlen(current_username) == 0)
         return;
 
-    // Tạo thư mục chat_history nếu chưa có (dùng mkdir thay vì system)
+    // Lấy thư mục chứa binary
+    char binary_dir[1024];
+    get_binary_directory(binary_dir, sizeof(binary_dir));
+
+    // Tạo đường dẫn đầy đủ đến thư mục chat_history
+    char history_dir[1024];
+    snprintf(history_dir, sizeof(history_dir), "%s/chat_history", binary_dir);
+
+    // Tạo thư mục chat_history nếu chưa có
     struct stat st = {0};
-    if (stat("chat_history", &st) == -1) {
-        mkdir("chat_history", 0755);
+    if (stat(history_dir, &st) == -1) {
+        mkdir(history_dir, 0755);
     }
 
-    // Tạo tên file lịch sử trong thư mục chat_history
+    // Tạo tên file lịch sử
     char filename[1024];
-    snprintf(filename, sizeof(filename), "chat_history/history_%s.txt", current_username);
+    snprintf(filename, sizeof(filename), "%s/history_%s.txt", history_dir, current_username);
 
     // Mở file ở chế độ append
     FILE *file = fopen(filename, "a");
@@ -154,7 +178,6 @@ void save_message_to_history(const char *from, const char *to, const char *messa
     }
 
     fclose(file);
-    printf("Saved message to: %s\n", filename);  // Debug
 }
 
 void load_chat_history_to_tab(const char *tab_name, bool is_group)
@@ -162,9 +185,13 @@ void load_chat_history_to_tab(const char *tab_name, bool is_group)
     if (!is_logged_in || strlen(current_username) == 0)
         return;
 
-    // Tạo tên file lịch sử trong thư mục chat_history
+    // Lấy thư mục chứa binary
+    char binary_dir[1024];
+    get_binary_directory(binary_dir, sizeof(binary_dir));
+
+    // Tạo đường dẫn đầy đủ đến file lịch sử
     char filename[1024];
-    snprintf(filename, sizeof(filename), "chat_history/history_%s.txt", current_username);
+    snprintf(filename, sizeof(filename), "%s/chat_history/history_%s.txt", binary_dir, current_username);
 
     FILE *file = fopen(filename, "r");
     if (file == NULL)
